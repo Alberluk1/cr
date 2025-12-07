@@ -98,6 +98,17 @@ class CryptoTracker:
                                     "source": "github",
                                     "raw_data": repo,
                                     "url": repo.get("html_url"),
+                                    "links": {
+                                        "github": repo.get("html_url"),
+                                        "homepage": repo.get("homepage"),
+                                        "api_url": repo.get("url"),
+                                    },
+                                    "metrics": {
+                                        "stars": repo.get("stargazers_count", 0),
+                                        "forks": repo.get("forks_count", 0),
+                                        "watchers": repo.get("watchers_count", 0),
+                                        "updated_at": repo.get("updated_at"),
+                                    },
                                 }
                             )
                             batch_count += 1
@@ -156,6 +167,19 @@ class CryptoTracker:
                                     "raw_data": protocol,
                                     "url": protocol.get("url"),
                                     "description": protocol.get("description"),
+                                    "links": {
+                                        "website": protocol.get("url"),
+                                        "twitter": protocol.get("twitter"),
+                                        "telegram": protocol.get("telegram"),
+                                        "github": protocol.get("github"),
+                                        "discord": protocol.get("discord"),
+                                    },
+                                    "metrics": {
+                                        "tvl": protocol.get("tvl", 0),
+                                        "chain": protocol.get("chain"),
+                                        "audits": protocol.get("audits", 0),
+                                        "category": protocol.get("category"),
+                                    },
                                 }
                             )
                     await log_detailed(
