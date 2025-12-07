@@ -134,7 +134,16 @@ def extract_json_from_llm_response(text: str) -> Dict[str, Any]:
             except Exception:
                 pass
 
-    # 3. Если фигурных скобок нет/поломаны — строим словарь из пар ключ:значение
+    # 3a. Если явно упоминается ключ score/scorenumeric без значения — отдаем дефолт
+    if re.search(r"score\s*numeric|scorenumeric", candidate, re.IGNORECASE):
+        return {
+            "score_numeric": 5.0,
+            "verdict": "HOLD",
+            "raw_text": raw_text[:500],
+            "note": "score keyword without value",
+        }
+
+    # 3b. Если фигурных скобок нет/поломаны — строим словарь из пар ключ:значение
     pair_dict = _build_dict_from_pairs(candidate)
     if pair_dict:
         return _normalize(pair_dict, raw_text)
