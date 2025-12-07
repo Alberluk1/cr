@@ -175,7 +175,7 @@ class CryptoTracker:
                 )
         return projects
 
-    async def run_full_scan(self) -> List[Dict[str, Any]]:
+    async def run_full_scan(self) -> Dict[str, Any]:
         """Полное сканирование (параллельно по источникам)."""
         await log_detailed("SCAN", "run_full_scan_start")
         await send_telegram_message("🛰️ Запуск сканирования источников")
@@ -183,17 +183,25 @@ class CryptoTracker:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_projects: List[Dict[str, Any]] = []
+        source_counts: Dict[str, int] = {}
         for result in results:
             if isinstance(result, list):
                 all_projects.extend(result)
+                for p in result:
+                    src = p.get("source", "unknown")
+                    source_counts[src] = source_counts.get(src, 0) + 1
         await log_detailed(
             "SCAN",
             "run_full_scan_done",
             status=f"total={len(all_projects)}",
+            details={"sources": source_counts},
         )
-        await send_telegram_message(f"🛰️ Сканирование завершено, найдено {len(all_projects)} проектов")
+        await send_telegram_message(
+            f"🛰️ Сканирование завершено, найдено {len(all_projects)} проектов\n"
+            + "\n".join(f"• {k}: {v}" for k, v in source_counts.items())
+        )
         await self.save_projects(all_projects)
-        return all_projects
+        return {"projects": all_projects, "source_counts": source_counts}
 
     async def save_projects(self, projects: List[Dict[str, Any]]) -> None:
         """Сохранение проектов в БД."""

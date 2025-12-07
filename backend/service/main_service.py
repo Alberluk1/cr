@@ -12,6 +12,7 @@ from backend.scanner.crypto_scanner import CryptoTracker
 from backend.analyzer.crypto_analyzer import CryptoAnalyzer
 from backend.telegram_client import send_message as send_telegram_message
 from backend.bot.telegram_logger import log_detailed
+from backend.model_checker import check_models
 
 
 class CryptoAlphaService:
@@ -33,16 +34,28 @@ class CryptoAlphaService:
         await send_telegram_message("⏳ Старт цикла сканирования")
         await log_detailed("SCAN", "start_cycle")
         try:
+            # Проверка моделей перед сканом
+            model_info = await check_models()
+            await send_telegram_message(
+                "🔍 Проверка моделей:\n"
+                + "✅ Доступно:\n"
+                + "\n".join(f"• {m}" for m in model_info.get("available", []))
+                + ("\n❌ Отсутствуют:\n" + "\n".join(f"• {m}" for m in model_info.get("missing", []))
+                   if model_info.get("missing") else "")
+            )
+
             scan_start = time.time()
-            await self.tracker.run_full_scan()
+            scan_result = await self.tracker.run_full_scan()
+            source_counts = scan_result.get("source_counts", {})
             await log_detailed(
                 "SCAN",
                 "sources_completed",
                 status=f"{time.time() - scan_start:.1f}s",
+                details={"sources": source_counts},
             )
             await send_telegram_message(f"📊 Источники просканированы за {time.time() - scan_start:.1f}s")
 
-            projects = await self.get_unanalyzed_projects()
+            projects = scan_result.get("projects") or await self.get_unanalyzed_projects()
             limit = self.scan_cfg.get("max_projects_per_scan", 20)
             for project in projects[:limit]:
                 await send_telegram_message(
