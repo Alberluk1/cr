@@ -149,10 +149,12 @@ class CryptoAnalyzer:
                 "verdict": "HOLD",
                 "raw": res,
             }
+        if not isinstance(res, dict):
+            res = {"score": 0.0, "score_numeric": 0.0, "verdict": "HOLD", "raw": res}
         if "score" not in res:
-            res["score"] = res.get("score_numeric", 5.0)
+            res["score"] = res.get("score_numeric", 0.0) or 0.0
         if "score_numeric" not in res:
-            res["score_numeric"] = res.get("score", 5.0)
+            res["score_numeric"] = res.get("score", 0.0) or 0.0
         if "verdict" not in res:
             res["verdict"] = "HOLD"
         return res
@@ -194,6 +196,7 @@ class CryptoAnalyzer:
                             "summary": None,
                         }
                     }
+
                 return {
                     "investment_analysis": {
                         "score_numeric": inv.get("score_numeric")
