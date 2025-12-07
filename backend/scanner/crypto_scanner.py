@@ -73,10 +73,15 @@ class CryptoTracker:
         ]
 
         projects: List[Dict[str, Any]] = []
-        async with aiohttp.ClientSession() as session:
+        headers = {"User-Agent": "crypto-alpha-scout"}
+        token = os.getenv("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        async with aiohttp.ClientSession(headers=headers) as session:
             for url in urls:
                 try:
-                    async with session.get(url, timeout=10) as response:
+                    async with session.get(url, timeout=15) as response:
                         if response.status != 200:
                             await log_detailed(
                                 "SCAN",
