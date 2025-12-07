@@ -42,7 +42,11 @@ class MainApplication:
 
     async def startup_checks(self):
         try:
-            await report_models()
+            report = await report_models()
+            if report:
+                from backend.telegram_client import send_message
+
+                await send_message(report)
         except Exception as e:
             await log_detailed("STARTUP", "model_check_failed", status=str(e), level="ERROR")
 

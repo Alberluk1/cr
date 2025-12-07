@@ -24,11 +24,22 @@ class CryptoAnalyzer:
         self.base_url: str = models_cfg.get("base_url", "http://localhost:11434")
         self.analysis_cfg: Dict[str, Any] = models_cfg.get("analysis", {})
 
+    def _normalize_model(self, name: str) -> str:
+        """Приводит имя модели к формату с подчеркиваниями (q4_K_M/q4_K_S)."""
+        return (
+            name.replace("q4KM", "q4_K_M")
+            .replace("q4KS", "q4_K_S")
+            .replace("::", ":")
+        )
+
     async def analyze_project(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
         """Полный анализ проекта."""
         temperature = self.analysis_cfg.get("temperature", 0.7)
         num_predict = self.analysis_cfg.get("max_tokens", 2048)
         timeout = self.analysis_cfg.get("analysis_timeout", 120)
+
+        models = [self._normalize_model(m) for m in self.council_models]
+        chairman_model = self._normalize_model(self.chairman_model)
 
         async with OllamaClient(self.base_url).session() as client:
             # Аналитик
@@ -40,7 +51,7 @@ class CryptoAnalyzer:
                 metadata=json.dumps(project_data.get("raw_data", {}), indent=2),
             )
             analyst_res = await client.generate(
-                self.council_models[0],
+                models[0],
                 analyst_prompt,
                 temperature=temperature,
                 num_predict=num_predict,
@@ -52,7 +63,7 @@ class CryptoAnalyzer:
                 project_data=json.dumps(project_data, indent=2)
             )
             risk_res = await client.generate(
-                self.council_models[1],
+                models[1],
                 risk_prompt,
                 temperature=temperature,
                 num_predict=num_predict,
@@ -64,7 +75,7 @@ class CryptoAnalyzer:
                 project_data=json.dumps(project_data, indent=2)
             )
             tech_res = await client.generate(
-                self.council_models[2],
+                models[2],
                 tech_prompt,
                 temperature=temperature,
                 num_predict=num_predict,
@@ -79,7 +90,7 @@ class CryptoAnalyzer:
                 analysis3=tech_res,
             )
             final_res = await client.generate(
-                self.chairman_model,
+                chairman_model,
                 chairman_prompt,
                 temperature=temperature,
                 num_predict=num_predict,

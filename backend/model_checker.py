@@ -41,8 +41,7 @@ async def check_models() -> Dict[str, Any]:
 async def report_models():
     """Отчет в Telegram о доступности моделей."""
     info = await check_models()
-    lines = ["🔍 [MODEL CHECK]"]
-    lines.append("════════════════════════════")
+    lines = ["🔍 [MODEL CHECK]", "════════════════════════════"]
     if info["available"]:
         lines.append("✅ ДОСТУПНЫЕ:")
         lines.extend(f"• {m}" for m in info["available"])
@@ -51,6 +50,7 @@ async def report_models():
         lines.extend(f"• {m}" for m in info["missing"])
         lines.append("\n💡 РЕШЕНИЕ:")
         lines.extend(f"ollama pull {m}" for m in info["missing"])
+    text_report = "\n".join(lines)
     await log_detailed(
         "OLLAMA",
         "model_check",
@@ -58,3 +58,4 @@ async def report_models():
         status=f"missing={len(info['missing'])}",
         details={"missing": ", ".join(info["missing"]) if info["missing"] else "none"},
     )
+    return text_report
