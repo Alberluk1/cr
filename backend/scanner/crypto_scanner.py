@@ -140,7 +140,7 @@ class CryptoTracker:
 
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(url, timeout=10) as response:
+                async with session.get(url, timeout=30) as response:
                     if response.status != 200:
                         await log_detailed(
                             "SCAN",
