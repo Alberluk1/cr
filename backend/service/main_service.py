@@ -79,7 +79,12 @@ class CryptoAlphaService:
                         self.analyzer.analyze_project(project), timeout=analysis_timeout
                     )
                     duration = time.time() - start
-                    inv = analysis.get("final_decision", {}).get("investment_analysis", {})
+                    inv_block = analysis.get("final_decision", {})
+                    if not isinstance(inv_block, dict):
+                        inv_block = {}
+                    inv = inv_block.get("investment_analysis", {})
+                    if not isinstance(inv, dict):
+                        inv = {}
                     score_val = inv.get("score_numeric") or inv.get("final_score") or "N/A"
                     await log_detailed(
                         "ANALYZE",
@@ -165,7 +170,11 @@ class CryptoAlphaService:
         conn = self._open_db()
         cursor = conn.cursor()
         final = analysis.get("final_decision", {}) or {}
+        if not isinstance(final, dict):
+            final = {}
         inv = final.get("investment_analysis", final)
+        if not isinstance(inv, dict):
+            inv = {}
         score = inv.get("score_numeric", inv.get("final_score", 0))
         verdict = inv.get("recommendation", inv.get("verdict"))
         try:
@@ -206,7 +215,11 @@ class CryptoAlphaService:
             return False
 
         final = analysis.get("final_decision", {}) or {}
+        if not isinstance(final, dict):
+            final = {}
         inv = final.get("investment_analysis", final)
+        if not isinstance(inv, dict):
+            inv = {}
         score = inv.get("score_numeric", 0) or 0
         verdict = (inv.get("recommendation") or inv.get("verdict") or "").upper()
         threshold = telegram_cfg.get("alert_threshold", 8.0)
