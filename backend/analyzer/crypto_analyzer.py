@@ -4,11 +4,11 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from backend.analyzer.prompts import (
-    ANALYST_PROMPT,
-    RISK_PROMPT,
-    TECH_PROMPT,
-    CHAIRMAN_PROMPT,
+from backend.analyzer.prompts_v2 import (
+    DEFI_PROJECT_PROMPT,
+    NFT_PROJECT_PROMPT,
+    EXPERIENCED_PROJECT_PROMPT,
+    GENERIC_PROMPT,
 )
 from backend.analyzer.result_parser import extract_json_from_llm_response
 from backend.config import get_llm_models
@@ -77,39 +77,71 @@ class CryptoAnalyzer:
 
     async def analyze_project(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
         """Упрощенный анализ: просим у модели только числа 1-10."""
-        temperature = 0.1
-        num_predict = 8
+        temperature = 0.3
+        num_predict = 16
         timeout = 20
 
         await self._resolve_models()
         model = (self._resolved_council or ["llama3.2:3b-instruct-q4_K_M"])[0]
 
         name = project_data.get("name", "Unknown")
-        category = project_data.get("category", "Unknown")
+        category = (project_data.get("category") or "Unknown").lower()
         source = project_data.get("source", "unknown")
+        description = project_data.get("description", "") or ""
 
-        prompts = [
-            ANALYST_PROMPT.format(name=name, category=category, source=source),
-            RISK_PROMPT.format(name=name, category=category, source=source),
-            TECH_PROMPT.format(name=name, category=category, source=source),
-            CHAIRMAN_PROMPT.format(name=name, category=category, source=source),
-        ]
+        # Подбираем промпт по категории
+        if "defi" in category:
+            prompt = DEFI_PROJECT_PROMPT.format(
+                name=name,
+                description=description[:400],
+                source=source,
+                category=category,
+                tvl=project_data.get("tvl", "unknown"),
+                audit_status=project_data.get("audit", "unknown"),
+            )
+        elif "nft" in category:
+            prompt = NFT_PROJECT_PROMPT.format(
+                name=name,
+                description=description[:400],
+                source=source,
+                category=category,
+                artist=project_data.get("artist", "unknown"),
+                utility=project_data.get("utility", "unknown"),
+            )
+        else:
+            prompt = EXPERIENCED_PROJECT_PROMPT.format(
+                name=name,
+                description=description[:400],
+                source=source,
+                category=category,
+            )
 
-        scores: List[float] = []
         raw_responses: List[str] = []
+        scores: List[float] = []
 
         try:
             async with OllamaClient(self.base_url).session() as client:
-                for pr in prompts:
-                    resp = await client.generate(
-                        model=model,
-                        prompt=pr,
-                        temperature=temperature,
-                        num_predict=num_predict,
-                        timeout=timeout,
-                    )
-                    raw_responses.append(resp)
-                    scores.append(self._extract_number(resp))
+                # Аналитик
+                resp1 = await client.generate(
+                    model=model,
+                    prompt=prompt,
+                    temperature=temperature,
+                    num_predict=num_predict,
+                    timeout=timeout,
+                )
+                raw_responses.append(resp1)
+                scores.append(self._extract_number(resp1))
+
+                # Финальная оценка тем же промптом (дублируем для усреднения)
+                resp2 = await client.generate(
+                    model=model,
+                    prompt=prompt,
+                    temperature=temperature + 0.1,
+                    num_predict=num_predict,
+                    timeout=timeout,
+                )
+                raw_responses.append(resp2)
+                scores.append(self._extract_number(resp2))
         except Exception as e:
             return {
                 "project_id": project_data.get("id"),
@@ -127,18 +159,18 @@ class CryptoAnalyzer:
             "investment_analysis": {
                 "score_numeric": avg_score,
                 "verdict": verdict,
-                "reason": "numeric-only quick evaluation",
+                "reason": "contextual numeric evaluation",
                 "confidence": confidence,
-                "summary": f"avg={avg_score:.1f} from simple prompts",
+                "summary": f"avg={avg_score:.1f} from contextual prompts",
             }
         }
 
         return {
             "project_id": project_data.get("id"),
             "project_name": name,
-            "analyst_analysis": {"score_numeric": scores[0] if len(scores) > 0 else avg_score},
+            "analyst_analysis": {"score_numeric": scores[0] if scores else avg_score},
             "risk_analysis": {"score_numeric": scores[1] if len(scores) > 1 else avg_score},
-            "technical_analysis": {"score_numeric": scores[2] if len(scores) > 2 else avg_score},
+            "technical_analysis": {"score_numeric": scores[0] if scores else avg_score},
             "final_decision": final_decision,
             "raw_responses": raw_responses,
             "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
