@@ -112,14 +112,14 @@ class CryptoAnalyzer:
                 tech_prompt = TECH_PROMPT.format(
                     project_data=json.dumps(project_data, indent=2)
                 )
-                tech_res = await gen(models[2], tech_prompt)
+            tech_res = await gen(models[2], tech_prompt)
 
-                chairman_prompt = CHAIRMAN_PROMPT.format(
-                    analysis1=analyst_res,
-                    analysis2=risk_res,
-                    analysis3=tech_res,
-                )
-                final_res = await gen(chairman_model, chairman_prompt)
+            chairman_prompt = CHAIRMAN_PROMPT.format(
+                analysis1=analyst_res,
+                analysis2=risk_res,
+                analysis3=tech_res,
+            )
+            final_res = await gen(chairman_model, chairman_prompt)
 
             return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
         except Exception as e:
@@ -164,14 +164,14 @@ class CryptoAnalyzer:
             final_json = self._extract_json(final_res)
 
             def normalize_final(data: Dict[str, Any]) -> Dict[str, Any]:
-                inv = data.get("investment_analysis", {}) if isinstance(data, dict) else {}
-                if inv:
+                inv = data.get("investment_analysis") if isinstance(data, dict) else None
+                if isinstance(inv, dict):
                     return {
                         "investment_analysis": {
-                            "score_numeric": inv.get("scorenumeric")
+                            "score_numeric": inv.get("score_numeric")
+                            or inv.get("scorenumeric")
                             or inv.get("scoreNumeric")
                             or inv.get("score")
-                            or inv.get("score_numeric")
                             or inv.get("finalscore")
                             or inv.get("final_score")
                             or "N/A",
@@ -184,10 +184,10 @@ class CryptoAnalyzer:
                 if isinstance(data, dict):
                     return {
                         "investment_analysis": {
-                            "score_numeric": data.get("scorenumeric")
+                            "score_numeric": data.get("score_numeric")
+                            or data.get("scorenumeric")
                             or data.get("scoreNumeric")
                             or data.get("score")
-                            or data.get("score_numeric")
                             or data.get("finalscore")
                             or data.get("final_score")
                             or "N/A",
@@ -199,7 +199,7 @@ class CryptoAnalyzer:
                     }
                 return {
                     "investment_analysis": {
-                        "score_numeric": None,
+                        "score_numeric": "N/A",
                         "verdict": None,
                         "reason": None,
                         "confidence": None,
