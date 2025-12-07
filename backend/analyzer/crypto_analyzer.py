@@ -121,9 +121,23 @@ class CryptoAnalyzer:
                 analysis2=risk_res,
                 analysis3=tech_res,
             )
-            final_res = await gen(chairman_model, chairman_prompt)
+        final_res = await gen(chairman_model, chairman_prompt)
 
-        return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
+        try:
+            return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
+        except Exception as e:
+            return {
+                "project_id": project_data.get("id"),
+                "project_name": project_data.get("name"),
+                "error": f"parse_error: {e}",
+                "raw": {
+                    "analyst": analyst_res,
+                    "risk": risk_res,
+                    "tech": tech_res,
+                    "final": final_res,
+                },
+                "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
+            }
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         return extract_json_from_llm_response(text)

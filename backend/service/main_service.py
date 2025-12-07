@@ -91,10 +91,21 @@ class CryptoAlphaService:
                     await send_telegram_message(
                         f"✅ Анализ завершен: {project.get('name','Unknown')} за {duration:.1f}s score={score_val}"
                     )
-                    await self.save_analysis(project["id"], analysis)
-                    await self._notify_project(project, analysis)
-                    if await self.should_notify(analysis):
-                        await self.send_notification(project, analysis)
+                    if analysis.get("error"):
+                        await log_detailed(
+                            "ANALYZE",
+                            "parse_error",
+                            data=project.get("name", "Unknown"),
+                            status=str(analysis.get("error")),
+                            details={"id": project.get("id")},
+                            level="ERROR",
+                        )
+                        await self._notify_error(f"Ошибка анализа {project.get('id')}: {analysis.get('error')}")
+                    else:
+                        await self.save_analysis(project["id"], analysis)
+                        await self._notify_project(project, analysis)
+                        if await self.should_notify(analysis):
+                            await self.send_notification(project, analysis)
                 except asyncio.TimeoutError:
                     await log_detailed(
                         "ANALYZE",
