@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from backend.analyzer.prompts import (
-    ANALYST_PROMPT,
-    RISK_PROMPT,
-    TECH_PROMPT,
-    CHAIRMAN_PROMPT,
+    SIMPLE_ANALYST_PROMPT,
+    SIMPLE_RISK_PROMPT,
+    SIMPLE_TECH_PROMPT,
+    SIMPLE_CHAIRMAN_PROMPT,
 )
+from backend.analyzer.result_parser import extract_json_from_llm_response
 from backend.config import get_llm_models
 from backend.ollama_client import OllamaClient
 from backend.model_checker import check_models
@@ -85,12 +86,8 @@ class CryptoAnalyzer:
         chairman_model = self._resolved_chairman or ""
 
         async with OllamaClient(self.base_url).session() as client:
-            analyst_prompt = ANALYST_PROMPT.format(
-                name=project_data.get("name", "Unknown"),
-                category=project_data.get("category", "Unknown"),
-                description=project_data.get("description", "No description"),
-                source=project_data.get("source", "Unknown"),
-                metadata=json.dumps(project_data.get("raw_data", {}), indent=2),
+            analyst_prompt = SIMPLE_ANALYST_PROMPT.format(
+                project_data=json.dumps(project_data, indent=2),
             )
             analyst_res = await client.generate(
                 models[0],
@@ -100,7 +97,7 @@ class CryptoAnalyzer:
                 timeout=timeout,
             )
 
-            risk_prompt = RISK_PROMPT.format(
+            risk_prompt = SIMPLE_RISK_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2)
             )
             risk_res = await client.generate(
@@ -111,7 +108,7 @@ class CryptoAnalyzer:
                 timeout=timeout,
             )
 
-            tech_prompt = TECH_PROMPT.format(
+            tech_prompt = SIMPLE_TECH_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2)
             )
             tech_res = await client.generate(
@@ -122,8 +119,7 @@ class CryptoAnalyzer:
                 timeout=timeout,
             )
 
-            chairman_prompt = CHAIRMAN_PROMPT.format(
-                project_name=project_data.get("name", "Unknown"),
+            chairman_prompt = SIMPLE_CHAIRMAN_PROMPT.format(
                 analysis1=analyst_res,
                 analysis2=risk_res,
                 analysis3=tech_res,
@@ -139,24 +135,7 @@ class CryptoAnalyzer:
         return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        """Извлекает JSON: снимает кодовые блоки, пробует несколько вариантов, не бросает исключений."""
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`")
-            if cleaned.lower().startswith("json"):
-                cleaned = cleaned[4:].strip()
-        candidates: List[str] = []
-        if cleaned.startswith("{"):
-            candidates.append(cleaned)
-        for match in re.finditer(r"\{.*\}", cleaned, re.DOTALL):
-            candidates.append(match.group())
-        for cand in candidates:
-            try:
-                return json.loads(cand)
-            except Exception:
-                continue
-        # Попытка исправить кавычки или запятые могла быть здесь, но оставляем фолбэк
-        return {"raw_text": text, "error": "invalid_json"}
+        return extract_json_from_llm_response(text)
 
     def _parse_results(
         self,
