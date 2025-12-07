@@ -1,4 +1,4 @@
-# Конфигурация Crypto Alpha Scout
+# Пример конфигурации Crypto Alpha Scout
 system:
   name: "Crypto Alpha Scout LLM Council"
   version: "1.0.0"
@@ -16,23 +16,24 @@ llm:
       chairman: "mistral:7b-instruct-q4_K_M"
   analysis:
     max_concurrent_analyses: 1
-    analysis_timeout: 120    # секунд
+    analysis_timeout: 60    # секунд
     temperature: 0.7
     max_tokens: 2048
+    delay_between: 10       # секунд между анализами
 
 scanner:
-  interval: 1800             # секунд (30 минут)
+  interval: 1800
   max_projects_per_scan: 20
   sources:
     github:
       enabled: true
-      api_rate_limit: 10     # запросов в минуту
+      api_rate_limit: 10
     defillama:
       enabled: true
     twitter:
-      enabled: false         # требует API ключ
+      enabled: false
     discord:
-      enabled: false         # требует webhooks
+      enabled: false
   filters:
     min_project_age_days: 0
     categories:
@@ -44,14 +45,14 @@ scanner:
 
 database:
   path: "data/crypto_projects.db"
-  backup_interval: 86400     # секунд (24 часа)
+  backup_interval: 86400
   max_records: 10000
 
 notifications:
   telegram:
     enabled: true
-    token: "8246586845:AAG2fGI6YZ719M39u_coxcPr1gTf6OVTrqw"                # TELEGRAM_BOT_TOKEN
-    chat_id: "-4746149710"              # TELEGRAM_CHAT_ID
+    token: "8246586845:AAG2fGI6YZ719M39u_coxcPr1gTf6OVTrqw"
+    chat_id: "-4746149710"
     alert_threshold: 8.0
 
 web_interface:

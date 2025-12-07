@@ -16,9 +16,10 @@ llm:
       chairman: "mistral:7b-instruct-q4_K_M"
   analysis:
     max_concurrent_analyses: 1
-    analysis_timeout: 120
+    analysis_timeout: 60
     temperature: 0.7
     max_tokens: 2048
+    delay_between: 10
 
 scanner:
   interval: 1800

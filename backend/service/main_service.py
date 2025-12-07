@@ -58,10 +58,15 @@ class CryptoAlphaService:
 
             projects = scan_result.get("projects") or await self.get_unanalyzed_projects()
             limit = self.scan_cfg.get("max_projects_per_scan", 20)
-            for project in projects[:limit]:
+            delay_between = self.analyzer.analysis_cfg.get("delay_between", 10)
+            analysis_timeout = self.analyzer.analysis_cfg.get("analysis_timeout", 60)
+
+            total = min(limit, len(projects))
+            for idx, project in enumerate(projects[:limit], 1):
                 try:
+                    await asyncio.sleep(delay_between)
                     await send_telegram_message(
-                        f"🔎 Анализ: {project.get('name','Unknown')} ({project.get('source','unknown')})"
+                        f"🔎 Анализ {idx}/{total}: {project.get('name','Unknown')} ({project.get('source','unknown')})"
                     )
                     await log_detailed(
                         "ANALYZE",
@@ -70,9 +75,12 @@ class CryptoAlphaService:
                         details={"id": project.get("id"), "source": project.get("source")},
                     )
                     start = time.time()
-                    analysis = await self.analyzer.analyze_project(project)
+                    analysis = await asyncio.wait_for(
+                        self.analyzer.analyze_project(project), timeout=analysis_timeout
+                    )
                     duration = time.time() - start
-                    score_val = analysis.get("final_decision", {}).get("investment_analysis", {}).get("score_numeric", "N/A")
+                    inv = analysis.get("final_decision", {}).get("investment_analysis", {})
+                    score_val = inv.get("score_numeric", inv.get("final_score", "N/A"))
                     await log_detailed(
                         "ANALYZE",
                         "done",
@@ -87,7 +95,17 @@ class CryptoAlphaService:
                     await self._notify_project(project, analysis)
                     if await self.should_notify(analysis):
                         await self.send_notification(project, analysis)
-                    await asyncio.sleep(5)  # Пауза для GPU
+                except asyncio.TimeoutError:
+                    await log_detailed(
+                        "ANALYZE",
+                        "timeout",
+                        data=project.get("name", "Unknown"),
+                        status=f">{analysis_timeout}s",
+                        details={"id": project.get("id")},
+                        level="WARNING",
+                    )
+                    await self._notify_error(f"Таймаут анализа: {project.get('name')}")
+                    continue
                 except Exception as e:
                     await log_detailed(
                         "ANALYZE",
