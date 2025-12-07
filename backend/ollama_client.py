@@ -1,6 +1,9 @@
 import aiohttp
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
+import time
+
+from backend.bot.telegram_logger import log_detailed
 
 
 class OllamaClient:
@@ -44,14 +47,42 @@ class OllamaClient:
                 "top_p": top_p,
             },
         }
-
-        async with self._session.post(
-            f"{self.base_url}/api/chat", json=payload, timeout=timeout
-        ) as response:
-            if response.status == 200:
-                data = await response.json()
-                return data.get("message", {}).get("content", "")
-            return f"Error: {response.status} - {await response.text()}"
+        start = time.time()
+        try:
+            async with self._session.post(
+                f"{self.base_url}/api/chat", json=payload, timeout=timeout
+            ) as response:
+                elapsed = time.time() - start
+                if response.status == 200:
+                    data = await response.json()
+                    await log_detailed(
+                        "OLLAMA",
+                        "chat_completion",
+                        data=f"model={model}",
+                        status=f"{response.status} ({elapsed:.1f}s)",
+                    )
+                    return data.get("message", {}).get("content", "")
+                text = await response.text()
+                await log_detailed(
+                    "OLLAMA",
+                    "chat_completion_error",
+                    data=f"model={model}",
+                    status=f"{response.status} ({elapsed:.1f}s)",
+                    details={"error": text},
+                    level="ERROR",
+                )
+                return f"Error: {response.status} - {text}"
+        except Exception as e:
+            elapsed = time.time() - start
+            await log_detailed(
+                "OLLAMA",
+                "chat_completion_exception",
+                data=f"model={model}",
+                status=f"fail ({elapsed:.1f}s)",
+                details={"error": str(e)},
+                level="ERROR",
+            )
+            return f"Exception: {str(e)}"
 
     async def generate(
         self,

@@ -11,6 +11,7 @@ from backend.config import get_notifications_config, get_scanner_config, get_db_
 from backend.scanner.crypto_scanner import CryptoTracker
 from backend.analyzer.crypto_analyzer import CryptoAnalyzer
 from backend.telegram_client import send_message as send_telegram_message
+from backend.bot.telegram_logger import log_detailed
 
 
 class CryptoAlphaService:
@@ -29,13 +30,36 @@ class CryptoAlphaService:
     async def scan_and_analyze(self):
         """Полный цикл: скан -> анализ -> уведомление."""
         print(f"[{datetime.now()}] start cycle")
-        await self._notify_info("⏳ Старт цикла сканирования")
+        await send_telegram_message("⏳ Старт цикла сканирования")
+        await log_detailed("SCAN", "start_cycle")
         try:
+            scan_start = time.time()
             await self.tracker.run_full_scan()
+            await log_detailed(
+                "SCAN",
+                "sources_completed",
+                status=f"{time.time() - scan_start:.1f}s",
+            )
+
             projects = await self.get_unanalyzed_projects()
             limit = self.scan_cfg.get("max_projects_per_scan", 20)
             for project in projects[:limit]:
+                await log_detailed(
+                    "ANALYZE",
+                    "start",
+                    data=project.get("name", "Unknown"),
+                    details={"id": project.get("id"), "source": project.get("source")},
+                )
+                start = time.time()
                 analysis = await self.analyzer.analyze_project(project)
+                duration = time.time() - start
+                await log_detailed(
+                    "ANALYZE",
+                    "done",
+                    data=project.get("name", "Unknown"),
+                    status=f"{duration:.1f}s",
+                    details={"score": analysis.get("final_decision", {}).get("final_score", "N/A")},
+                )
                 await self.save_analysis(project["id"], analysis)
                 await self._notify_project(project, analysis)
                 if await self.should_notify(analysis):
@@ -185,7 +209,7 @@ class CryptoAlphaService:
         await send_telegram_message(text)
 
     async def _notify_scan_complete(self):
-        """Краткий статус завершения сканирования."""
+        """Краткое уведомление о завершении сканирования/анализа."""
         await send_telegram_message("✅ Сканирование завершено")
 
     async def _notify_error(self, message: str):

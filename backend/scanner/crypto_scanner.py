@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 
 from backend.config import get_db_path, get_scanner_config
+from backend.bot.telegram_logger import log_detailed
 
 
 def _ensure_dir(path: str) -> None:
@@ -76,8 +77,16 @@ class CryptoTracker:
                 try:
                     async with session.get(url, timeout=10) as response:
                         if response.status != 200:
+                            await log_detailed(
+                                "SCAN",
+                                "github_error",
+                                data=url,
+                                status=str(response.status),
+                                level="WARNING",
+                            )
                             continue
                         data = await response.json()
+                        batch_count = 0
                         for repo in data.get("items", [])[:10]:
                             projects.append(
                                 {
@@ -90,8 +99,22 @@ class CryptoTracker:
                                     "url": repo.get("html_url"),
                                 }
                             )
+                            batch_count += 1
+                        await log_detailed(
+                            "SCAN",
+                            "github_ok",
+                            data=url,
+                            status=f"items={batch_count}",
+                        )
                 except Exception as e:
                     print(f"Error scanning GitHub: {e}")
+                    await log_detailed(
+                        "SCAN",
+                        "github_exception",
+                        data=url,
+                        status=str(e),
+                        level="ERROR",
+                    )
         return projects
 
     async def scan_defi_llama(self) -> List[Dict[str, Any]]:
@@ -107,6 +130,13 @@ class CryptoTracker:
             try:
                 async with session.get(url, timeout=10) as response:
                     if response.status != 200:
+                        await log_detailed(
+                            "SCAN",
+                            "defillama_error",
+                            data=url,
+                            status=str(response.status),
+                            level="WARNING",
+                        )
                         return []
                     data = await response.json()
                     for protocol in data:
@@ -127,12 +157,26 @@ class CryptoTracker:
                                     "description": protocol.get("description"),
                                 }
                             )
+                    await log_detailed(
+                        "SCAN",
+                        "defillama_ok",
+                        data="new protocols",
+                        status=f"count={len(projects)}",
+                    )
             except Exception as e:
                 print(f"Error scanning DeFi Llama: {e}")
+                await log_detailed(
+                    "SCAN",
+                    "defillama_exception",
+                    data=url,
+                    status=str(e),
+                    level="ERROR",
+                )
         return projects
 
     async def run_full_scan(self) -> List[Dict[str, Any]]:
         """Полное сканирование (параллельно по источникам)."""
+        await log_detailed("SCAN", "run_full_scan_start")
         tasks = [self.scan_github(), self.scan_defi_llama()]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -140,11 +184,16 @@ class CryptoTracker:
         for result in results:
             if isinstance(result, list):
                 all_projects.extend(result)
+        await log_detailed(
+            "SCAN",
+            "run_full_scan_done",
+            status=f"total={len(all_projects)}",
+        )
         await self.save_projects(all_projects)
         return all_projects
 
     async def save_projects(self, projects: List[Dict[str, Any]]) -> None:
-        """Сохранение в БД."""
+        """Сохранение проектов в БД."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         for project in projects:
@@ -167,5 +216,12 @@ class CryptoTracker:
                 )
             except Exception as e:
                 print(f"Error saving project {project.get('id')}: {e}")
+                await log_detailed(
+                    "SCAN",
+                    "save_project_error",
+                    data=str(project.get("id")),
+                    status=str(e),
+                    level="ERROR",
+                )
         conn.commit()
         conn.close()
