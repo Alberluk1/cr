@@ -76,59 +76,84 @@ class CryptoAnalyzer:
         )
 
     async def analyze_project(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Полный анализ проекта через LLM Council."""
+        """Упрощенный анализ: просим у модели только числа 1-10."""
+        temperature = 0.1
+        num_predict = 8
+        timeout = 20
+
+        await self._resolve_models()
+        model = (self._resolved_council or ["llama3.2:3b-instruct-q4_K_M"])[0]
+
+        name = project_data.get("name", "Unknown")
+        category = project_data.get("category", "Unknown")
+        source = project_data.get("source", "unknown")
+
+        prompts = [
+            ANALYST_PROMPT.format(name=name, category=category, source=source),
+            RISK_PROMPT.format(name=name, category=category, source=source),
+            TECH_PROMPT.format(name=name, category=category, source=source),
+            CHAIRMAN_PROMPT.format(name=name, category=category, source=source),
+        ]
+
+        scores: List[float] = []
+        raw_responses: List[str] = []
+
         try:
-            temperature = self.analysis_cfg.get("temperature", 0.7)
-            num_predict = self.analysis_cfg.get("max_tokens", 2048)
-            timeout = self.analysis_cfg.get("analysis_timeout", 120)
-
-            await self._resolve_models()
-            models = self._resolved_council or []
-            chairman_model = self._resolved_chairman or ""
-
             async with OllamaClient(self.base_url).session() as client:
-                async def gen(model_name: str, prompt: str) -> str:
-                    try:
-                        return await client.generate(
-                            model_name,
-                            prompt,
-                            temperature=temperature,
-                            num_predict=num_predict,
-                            timeout=timeout,
-                        )
-                    except Exception as e:
-                        return json.dumps({"error": str(e), "model": model_name})
-
-                analyst_prompt = ANALYST_PROMPT.format(
-                    project_data=json.dumps(project_data, indent=2),
-                )
-                analyst_res = await gen(models[0], analyst_prompt)
-
-                risk_prompt = RISK_PROMPT.format(
-                    project_data=json.dumps(project_data, indent=2)
-                )
-                risk_res = await gen(models[1], risk_prompt)
-
-                tech_prompt = TECH_PROMPT.format(
-                    project_data=json.dumps(project_data, indent=2)
-                )
-                tech_res = await gen(models[2], tech_prompt)
-
-                chairman_prompt = CHAIRMAN_PROMPT.format(
-                    analysis1=analyst_res,
-                    analysis2=risk_res,
-                    analysis3=tech_res,
-                )
-                final_res = await gen(chairman_model, chairman_prompt)
-
-            return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
+                for pr in prompts:
+                    resp = await client.generate(
+                        model=model,
+                        prompt=pr,
+                        temperature=temperature,
+                        num_predict=num_predict,
+                        timeout=timeout,
+                    )
+                    raw_responses.append(resp)
+                    scores.append(self._extract_number(resp))
         except Exception as e:
             return {
                 "project_id": project_data.get("id"),
-                "project_name": project_data.get("name"),
+                "project_name": name,
                 "error": f"analyze_exception: {e}",
+                "raw": raw_responses,
                 "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
             }
+
+        avg_score = sum(scores) / len(scores) if scores else 5.0
+        verdict = "BUY" if avg_score >= 7 else "HOLD" if avg_score >= 5 else "AVOID"
+        confidence = "HIGH" if avg_score >= 8 else "MEDIUM" if avg_score >= 5 else "LOW"
+
+        final_decision = {
+            "investment_analysis": {
+                "score_numeric": avg_score,
+                "verdict": verdict,
+                "reason": "numeric-only quick evaluation",
+                "confidence": confidence,
+                "summary": f"avg={avg_score:.1f} from simple prompts",
+            }
+        }
+
+        return {
+            "project_id": project_data.get("id"),
+            "project_name": name,
+            "analyst_analysis": {"score_numeric": scores[0] if len(scores) > 0 else avg_score},
+            "risk_analysis": {"score_numeric": scores[1] if len(scores) > 1 else avg_score},
+            "technical_analysis": {"score_numeric": scores[2] if len(scores) > 2 else avg_score},
+            "final_decision": final_decision,
+            "raw_responses": raw_responses,
+            "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+
+    def _extract_number(self, text: str) -> float:
+        """Извлекает число 1-10 из текста. Если нет — возвращает 5."""
+        try:
+            text = (text or "").strip()
+            match = re.search(r"\b(10|[1-9])\b", text)
+            if match:
+                return float(match.group(1))
+        except Exception:
+            pass
+        return 5.0
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         try:
@@ -167,73 +192,70 @@ class CryptoAnalyzer:
         final_res: str,
         project_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        try:
-            analyst_json = self._extract_json(analyst_res)
-            risk_json = self._extract_json(risk_res)
-            tech_json = self._extract_json(tech_res)
-            final_json = self._extract_json(final_res)
+        analyst_json = self._extract_json(analyst_res)
+        risk_json = self._extract_json(risk_res)
+        tech_json = self._extract_json(tech_res)
+        final_json = self._extract_json(final_res)
 
-            def normalize_final(data: Dict[str, Any]) -> Dict[str, Any]:
-                if not isinstance(data, dict):
-                    return {
-                        "investment_analysis": {
-                            "score_numeric": "N/A",
-                            "verdict": None,
-                            "reason": None,
-                            "confidence": None,
-                            "summary": None,
-                        }
-                    }
-
-                inv = data.get("investment_analysis")
-                if not isinstance(inv, dict):
-                    return {
-                        "investment_analysis": {
-                            "score_numeric": "N/A",
-                            "verdict": None,
-                            "reason": None,
-                            "confidence": None,
-                            "summary": None,
-                        }
-                    }
-
+        def normalize_final(data: Dict[str, Any]) -> Dict[str, Any]:
+            if not isinstance(data, dict):
                 return {
                     "investment_analysis": {
-                        "score_numeric": inv.get("score_numeric")
-                        or inv.get("scorenumeric")
-                        or inv.get("scoreNumeric")
-                        or inv.get("score")
-                        or inv.get("finalscore")
-                        or inv.get("final_score")
-                        or "N/A",
-                        "verdict": inv.get("verdict"),
-                        "reason": inv.get("reason") or inv.get("summary"),
-                        "confidence": inv.get("confidence"),
-                        "summary": inv.get("summary"),
+                        "score_numeric": "N/A",
+                        "verdict": None,
+                        "reason": None,
+                        "confidence": None,
+                        "summary": None,
                     }
                 }
 
-            final_normalized = normalize_final(final_json)
+            inv = data.get("investment_analysis")
+            if not isinstance(inv, dict):
+                return {
+                    "investment_analysis": {
+                        "score_numeric": "N/A",
+                        "verdict": None,
+                        "reason": None,
+                        "confidence": None,
+                        "summary": None,
+                    }
+                }
 
             return {
-                "project_id": project_data.get("id"),
-                "project_name": project_data.get("name"),
-                "analyst_analysis": analyst_json,
-                "risk_analysis": risk_json,
-                "technical_analysis": tech_json,
-                "final_decision": final_normalized,
-                "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
+                "investment_analysis": {
+                    "score_numeric": inv.get("score_numeric")
+                    or inv.get("scorenumeric")
+                    or inv.get("scoreNumeric")
+                    or inv.get("score")
+                    or inv.get("finalscore")
+                    or inv.get("final_score")
+                    or "N/A",
+                    "verdict": inv.get("verdict"),
+                    "reason": inv.get("reason") or inv.get("summary"),
+                    "confidence": inv.get("confidence"),
+                    "summary": inv.get("summary"),
+                }
             }
-        except Exception as e:
-            return {
-                "project_id": project_data.get("id"),
-                "project_name": project_data.get("name"),
-                "error": f"parse_exception: {e}",
-                "raw": {
-                    "analyst": analyst_res,
-                    "risk": risk_res,
-                    "tech": tech_res,
-                    "final": final_res,
-                },
-                "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
+
+        try:
+            final_normalized = normalize_final(final_json)
+        except Exception:
+            final_normalized = {
+                "investment_analysis": {
+                    "score_numeric": "N/A",
+                    "verdict": None,
+                    "reason": None,
+                    "confidence": None,
+                    "summary": None,
+                }
             }
+
+        return {
+            "project_id": project_data.get("id"),
+            "project_name": project_data.get("name"),
+            "analyst_analysis": analyst_json,
+            "risk_analysis": risk_json,
+            "technical_analysis": tech_json,
+            "final_decision": final_normalized,
+            "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
