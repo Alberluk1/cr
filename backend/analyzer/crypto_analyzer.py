@@ -112,14 +112,14 @@ class CryptoAnalyzer:
                 tech_prompt = TECH_PROMPT.format(
                     project_data=json.dumps(project_data, indent=2)
                 )
-            tech_res = await gen(models[2], tech_prompt)
+                tech_res = await gen(models[2], tech_prompt)
 
-            chairman_prompt = CHAIRMAN_PROMPT.format(
-                analysis1=analyst_res,
-                analysis2=risk_res,
-                analysis3=tech_res,
-            )
-            final_res = await gen(chairman_model, chairman_prompt)
+                chairman_prompt = CHAIRMAN_PROMPT.format(
+                    analysis1=analyst_res,
+                    analysis2=risk_res,
+                    analysis3=tech_res,
+                )
+                final_res = await gen(chairman_model, chairman_prompt)
 
             return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
         except Exception as e:
@@ -140,6 +140,14 @@ class CryptoAnalyzer:
                 "verdict": "HOLD",
                 "error": f"parser_exception: {e}",
                 "source": "parser_exception",
+            }
+        if not isinstance(res, dict):
+            # Если парсер вернул не словарь, оборачиваем в безопасный dict
+            return {
+                "score": 0.0,
+                "score_numeric": 0.0,
+                "verdict": "HOLD",
+                "raw": res,
             }
         if "score" not in res:
             res["score"] = res.get("score_numeric", 5.0)
@@ -164,46 +172,41 @@ class CryptoAnalyzer:
             final_json = self._extract_json(final_res)
 
             def normalize_final(data: Dict[str, Any]) -> Dict[str, Any]:
-                inv = data.get("investment_analysis") if isinstance(data, dict) else None
-                if isinstance(inv, dict):
+                if not isinstance(data, dict):
                     return {
                         "investment_analysis": {
-                            "score_numeric": inv.get("score_numeric")
-                            or inv.get("scorenumeric")
-                            or inv.get("scoreNumeric")
-                            or inv.get("score")
-                            or inv.get("finalscore")
-                            or inv.get("final_score")
-                            or "N/A",
-                            "verdict": inv.get("verdict"),
-                            "reason": inv.get("reason") or inv.get("summary"),
-                            "confidence": inv.get("confidence"),
-                            "summary": inv.get("summary"),
+                            "score_numeric": "N/A",
+                            "verdict": None,
+                            "reason": None,
+                            "confidence": None,
+                            "summary": None,
                         }
                     }
-                if isinstance(data, dict):
+
+                inv = data.get("investment_analysis")
+                if not isinstance(inv, dict):
                     return {
                         "investment_analysis": {
-                            "score_numeric": data.get("score_numeric")
-                            or data.get("scorenumeric")
-                            or data.get("scoreNumeric")
-                            or data.get("score")
-                            or data.get("finalscore")
-                            or data.get("final_score")
-                            or "N/A",
-                            "verdict": data.get("verdict"),
-                            "reason": data.get("reason") or data.get("summary"),
-                            "confidence": data.get("confidence"),
-                            "summary": data.get("summary"),
+                            "score_numeric": "N/A",
+                            "verdict": None,
+                            "reason": None,
+                            "confidence": None,
+                            "summary": None,
                         }
                     }
                 return {
                     "investment_analysis": {
-                        "score_numeric": "N/A",
-                        "verdict": None,
-                        "reason": None,
-                        "confidence": None,
-                        "summary": None,
+                        "score_numeric": inv.get("score_numeric")
+                        or inv.get("scorenumeric")
+                        or inv.get("scoreNumeric")
+                        or inv.get("score")
+                        or inv.get("finalscore")
+                        or inv.get("final_score")
+                        or "N/A",
+                        "verdict": inv.get("verdict"),
+                        "reason": inv.get("reason") or inv.get("summary"),
+                        "confidence": inv.get("confidence"),
+                        "summary": inv.get("summary"),
                     }
                 }
 
