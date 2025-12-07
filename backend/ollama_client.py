@@ -89,10 +89,20 @@ class OllamaClient:
         model: str,
         prompt: str,
         system_prompt: Optional[str] = None,
+        timeout: int = 30,
         **kwargs: Any,
     ) -> str:
+        """Генерация с таймаутом и безопасным возвратом ошибки."""
         messages: List[Dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        return await self.chat_completion(model=model, messages=messages, **kwargs)
+        try:
+            return await asyncio.wait_for(
+                self.chat_completion(model=model, messages=messages, **kwargs),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            return '{"error": "timeout", "message": "LLM timeout"}'
+        except Exception as e:
+            return json.dumps({"error": str(e), "message": "LLM error"})
