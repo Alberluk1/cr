@@ -157,41 +157,73 @@ class CryptoAnalyzer:
         final_res: str,
         project_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        analyst_json = self._extract_json(analyst_res)
-        risk_json = self._extract_json(risk_res)
-        tech_json = self._extract_json(tech_res)
-        final_json = self._extract_json(final_res)
+        try:
+            analyst_json = self._extract_json(analyst_res)
+            risk_json = self._extract_json(risk_res)
+            tech_json = self._extract_json(tech_res)
+            final_json = self._extract_json(final_res)
 
-        def normalize_final(data: Dict[str, Any]) -> Dict[str, Any]:
-            inv = data.get("investment_analysis", {})
-            if inv:
+            def normalize_final(data: Dict[str, Any]) -> Dict[str, Any]:
+                inv = data.get("investment_analysis", {}) if isinstance(data, dict) else {}
+                if inv:
+                    return {
+                        "investment_analysis": {
+                            "score_numeric": inv.get("scorenumeric")
+                            or inv.get("score")
+                            or inv.get("score_numeric")
+                            or inv.get("finalscore")
+                            or inv.get("final_score"),
+                            "verdict": inv.get("verdict"),
+                            "reason": inv.get("reason") or inv.get("summary"),
+                            "confidence": inv.get("confidence"),
+                            "summary": inv.get("summary"),
+                        }
+                    }
+                if isinstance(data, dict):
+                    return {
+                        "investment_analysis": {
+                            "score_numeric": data.get("scorenumeric")
+                            or data.get("score")
+                            or data.get("score_numeric")
+                            or data.get("finalscore")
+                            or data.get("final_score"),
+                            "verdict": data.get("verdict"),
+                            "reason": data.get("reason") or data.get("summary"),
+                            "confidence": data.get("confidence"),
+                            "summary": data.get("summary"),
+                        }
+                    }
                 return {
                     "investment_analysis": {
-                        "score_numeric": inv.get("scorenumeric") or inv.get("score") or inv.get("score_numeric") or inv.get("finalscore") or inv.get("final_score"),
-                        "verdict": inv.get("verdict"),
-                        "reason": inv.get("reason") or inv.get("summary"),
-                        "confidence": inv.get("confidence"),
-                        "summary": inv.get("summary"),
+                        "score_numeric": None,
+                        "verdict": None,
+                        "reason": None,
+                        "confidence": None,
+                        "summary": None,
                     }
                 }
+
+            final_normalized = normalize_final(final_json)
+
             return {
-                "investment_analysis": {
-                    "score_numeric": data.get("scorenumeric") or data.get("score") or data.get("score_numeric") or data.get("finalscore") or data.get("final_score"),
-                    "verdict": data.get("verdict"),
-                    "reason": data.get("reason") or data.get("summary"),
-                    "confidence": data.get("confidence"),
-                    "summary": data.get("summary"),
-                }
+                "project_id": project_data.get("id"),
+                "project_name": project_data.get("name"),
+                "analyst_analysis": analyst_json,
+                "risk_analysis": risk_json,
+                "technical_analysis": tech_json,
+                "final_decision": final_normalized,
+                "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
             }
-
-        final_normalized = normalize_final(final_json)
-
-        return {
-            "project_id": project_data.get("id"),
-            "project_name": project_data.get("name"),
-            "analyst_analysis": analyst_json,
-            "risk_analysis": risk_json,
-            "technical_analysis": tech_json,
-            "final_decision": final_normalized,
-            "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
-        }
+        except Exception as e:
+            return {
+                "project_id": project_data.get("id"),
+                "project_name": project_data.get("name"),
+                "error": f"parse_exception: {e}",
+                "raw": {
+                    "analyst": analyst_res,
+                    "risk": risk_res,
+                    "tech": tech_res,
+                    "final": final_res,
+                },
+                "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
+            }

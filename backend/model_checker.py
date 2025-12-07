@@ -7,6 +7,15 @@ from backend.bot.telegram_logger import log_detailed
 from backend.config import get_llm_models
 
 
+def _normalize(name: str) -> str:
+    """Приводит имя модели к виду с подчеркиваниями (q4_K_M/q4_K_S)."""
+    return (
+        name.replace("q4KM", "q4_K_M")
+        .replace("q4KS", "q4_K_S")
+        .replace("::", ":")
+    )
+
+
 async def fetch_available_models(base_url: str) -> List[str]:
     """Запрашивает список моделей из Ollama."""
     url = f"{base_url.rstrip('/')}/api/tags"
@@ -26,8 +35,8 @@ async def check_models() -> Dict[str, Any]:
     cfg = get_llm_models()
     base_url = cfg.get("base_url", "http://localhost:11434")
     required = cfg.get("council", []) + ([cfg.get("chairman")] if cfg.get("chairman") else [])
-    required = [m for m in required if m]
-    available = await fetch_available_models(base_url)
+    required = [_normalize(m) for m in required if m]
+    available = [_normalize(m) for m in await fetch_available_models(base_url)]
 
     missing = [m for m in required if m not in available]
     return {
