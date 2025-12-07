@@ -98,3 +98,7 @@ class AdvancedAnalyzer:
             "scores": [],
             "consensus_used": "fallback",
         }
+
+    async def analyze_project(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Обратная совместимость: основной метод анализа вызывает консенсус."""
+        return await self.analyze_with_consensus(project_data)
