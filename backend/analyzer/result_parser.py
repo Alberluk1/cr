@@ -20,12 +20,12 @@ def safe_load_json(text: str) -> Dict[str, Any]:
                 or data.get("scorenumeric")
                 or data.get("Score")
                 or data.get("score_numeric")
-                or 5
+                or 0
             )
             verdict = data.get("verdict") or data.get("Verdict") or "HOLD"
             res = {
-                "score": float(score) if score is not None else 5.0,
-                "score_numeric": float(score) if score is not None else 5.0,
+                "score": float(score) if score is not None else 0.0,
+                "score_numeric": float(score) if score is not None else 0.0,
                 "verdict": str(verdict).upper(),
                 "source": "valid_json",
             }
@@ -38,8 +38,8 @@ def safe_load_json(text: str) -> Dict[str, Any]:
     if text.startswith('"') and text.endswith('"'):
         inner_text = text[1:-1]
         if "score" in inner_text.lower():
-            return {"score": 5.0, "score_numeric": 5.0, "verdict": "HOLD", "source": "score_key_only"}
-        return {"score": 5.0, "score_numeric": 5.0, "verdict": "HOLD", "source": "quoted_string"}
+            return {"score": 0.0, "score_numeric": 0.0, "verdict": "HOLD", "source": "score_key_only"}
+        return {"score": 0.0, "score_numeric": 0.0, "verdict": "HOLD", "source": "quoted_string"}
 
     # СЛУЧАЙ 3: Ищем число 1-10 в тексте
     number_match = re.search(r"\b([1-9]|10)(?:\.\d+)?\b", text)
@@ -62,12 +62,12 @@ def safe_load_json(text: str) -> Dict[str, Any]:
 
     # СЛУЧАЙ 5: Упомянут score/scorenumeric/numeric без значения
     if "score" in text.lower() or "numeric" in text.lower():
-        return {"score": 5.0, "score_numeric": 5.0, "verdict": "HOLD", "source": "score_mentioned"}
+        return {"score": 0.0, "score_numeric": 0.0, "verdict": "HOLD", "source": "score_mentioned"}
 
     # Fallback: средняя оценка
     return {
-        "score": 5.0,
-        "score_numeric": 5.0,
+        "score": 0.0,
+        "score_numeric": 0.0,
         "verdict": "HOLD",
         "source": "fallback",
         "note": f"Could not parse: {text[:50]}",
