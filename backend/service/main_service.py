@@ -101,6 +101,7 @@ class CryptoAlphaService:
                             level="ERROR",
                         )
                         await self._notify_error(f"Ошибка анализа {project.get('id')}: {analysis.get('error')}")
+                        continue
                     else:
                         await self.save_analysis(project["id"], analysis)
                         await self._notify_project(project, analysis)
