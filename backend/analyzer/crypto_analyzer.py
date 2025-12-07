@@ -140,7 +140,23 @@ class CryptoAnalyzer:
             }
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        return extract_json_from_llm_response(text)
+        try:
+            res = extract_json_from_llm_response(text)
+        except Exception as e:
+            return {
+                "score": 5.0,
+                "score_numeric": 5.0,
+                "verdict": "HOLD",
+                "error": f"parser_exception: {e}",
+                "source": "parser_exception",
+            }
+        if "score" not in res:
+            res["score"] = res.get("score_numeric", 5.0)
+        if "score_numeric" not in res:
+            res["score_numeric"] = res.get("score", 5.0)
+        if "verdict" not in res:
+            res["verdict"] = "HOLD"
+        return res
 
     def _parse_results(
         self,
