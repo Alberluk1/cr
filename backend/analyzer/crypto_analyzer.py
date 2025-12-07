@@ -12,6 +12,8 @@ from backend.analyzer.prompts import (
 )
 from backend.config import get_llm_models
 from backend.ollama_client import OllamaClient
+from backend.model_checker import check_models
+from backend.bot.telegram_logger import log_detailed
 
 
 class CryptoAnalyzer:
@@ -23,26 +25,66 @@ class CryptoAnalyzer:
         self.chairman_model: str = models_cfg.get("chairman", "")
         self.base_url: str = models_cfg.get("base_url", "http://localhost:11434")
         self.analysis_cfg: Dict[str, Any] = models_cfg.get("analysis", {})
+        self._resolved_council: List[str] | None = None
+        self._resolved_chairman: str | None = None
 
     def _normalize_model(self, name: str) -> str:
-        """Приводит имя модели к формату с подчеркиваниями (q4_K_M/q4_K_S)."""
+        """Нормализует имя модели (q4KM->q4_K_M, q4KS->q4_K_S)."""
         return (
             name.replace("q4KM", "q4_K_M")
             .replace("q4KS", "q4_K_S")
             .replace("::", ":")
         )
 
+    async def _resolve_models(self):
+        """Определяет доступные модели и подставляет fallback."""
+        if self._resolved_council is not None and self._resolved_chairman is not None:
+            return
+
+        cfg_models = [self._normalize_model(m) for m in self.council_models if m]
+        cfg_chair = self._normalize_model(self.chairman_model) if self.chairman_model else ""
+
+        info = await check_models()
+        available = [self._normalize_model(m) for m in info.get("available", []) if m]
+        missing = []
+
+        def pick_model(target: str, fallback: str) -> str:
+            if target in available:
+                return target
+            missing.append(target)
+            return fallback
+
+        fallback = available[0] if available else (cfg_models[0] if cfg_models else "llama3.2:3b-instruct-q4_K_M")
+        resolved = []
+        for m in cfg_models[:3]:
+            resolved.append(pick_model(m, fallback))
+        while len(resolved) < 3:
+            resolved.append(fallback)
+
+        chair_resolved = pick_model(cfg_chair or fallback, fallback)
+
+        self._resolved_council = resolved
+        self._resolved_chairman = chair_resolved
+
+        await log_detailed(
+            "LLM",
+            "model_resolution",
+            data="; ".join(resolved + [chair_resolved]),
+            status=f"missing={len(missing)}",
+            details={"missing": ", ".join(missing) if missing else "none", "fallback": fallback},
+        )
+
     async def analyze_project(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Полный анализ проекта."""
+        """Полный анализ проекта через LLM Council."""
         temperature = self.analysis_cfg.get("temperature", 0.7)
         num_predict = self.analysis_cfg.get("max_tokens", 2048)
         timeout = self.analysis_cfg.get("analysis_timeout", 120)
 
-        models = [self._normalize_model(m) for m in self.council_models]
-        chairman_model = self._normalize_model(self.chairman_model)
+        await self._resolve_models()
+        models = self._resolved_council or []
+        chairman_model = self._resolved_chairman or ""
 
         async with OllamaClient(self.base_url).session() as client:
-            # Аналитик
             analyst_prompt = ANALYST_PROMPT.format(
                 name=project_data.get("name", "Unknown"),
                 category=project_data.get("category", "Unknown"),
@@ -58,7 +100,6 @@ class CryptoAnalyzer:
                 timeout=timeout,
             )
 
-            # Risk
             risk_prompt = RISK_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2)
             )
@@ -70,7 +111,6 @@ class CryptoAnalyzer:
                 timeout=timeout,
             )
 
-            # Tech
             tech_prompt = TECH_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2)
             )
@@ -82,7 +122,6 @@ class CryptoAnalyzer:
                 timeout=timeout,
             )
 
-            # Chairman
             chairman_prompt = CHAIRMAN_PROMPT.format(
                 project_name=project_data.get("name", "Unknown"),
                 analysis1=analyst_res,
@@ -100,14 +139,24 @@ class CryptoAnalyzer:
         return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        """Извлекает JSON из текста LLM."""
-        try:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            return {"raw_text": text}
-        except json.JSONDecodeError:
-            return {"raw_text": text, "error": "invalid_json"}
+        """Извлекает JSON: снимает кодовые блоки, пробует несколько вариантов, не бросает исключений."""
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+        candidates: List[str] = []
+        if cleaned.startswith("{"):
+            candidates.append(cleaned)
+        for match in re.finditer(r"\{.*\}", cleaned, re.DOTALL):
+            candidates.append(match.group())
+        for cand in candidates:
+            try:
+                return json.loads(cand)
+            except Exception:
+                continue
+        # Попытка исправить кавычки или запятые могла быть здесь, но оставляем фолбэк
+        return {"raw_text": text, "error": "invalid_json"}
 
     def _parse_results(
         self,
