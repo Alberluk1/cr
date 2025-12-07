@@ -9,11 +9,11 @@ llm:
     base_url: "http://localhost:11434"
     models:
       council:
-        - "llama3.2:3b-instruct-q4_K_M"  # Аналитик
-        - "llama3.2:3b-instruct-q4_K_M"  # Risk
-        - "llama3.2:3b-instruct-q4_K_M"  # Технический
-        - "llama3.2:3b-instruct-q4_K_M"  # Стратег/доп. роль
-      chairman: "llama3.2:3b-instruct-q4_K_M"
+        - "mistral:7b-instruct-q4_K_M"     # Аналитик (главный, 7b)
+        - "llama3.2:3b-instruct-q4_K_M"    # Быстрый риск-оценщик (3b)
+        - "qwen2.5:3b-instruct-q4_K_M"     # Технический эксперт (3b)
+        - "gemma2:2b-instruct-q4_K_S"      # Лёгкий сканер (2b)
+      chairman: "mistral:7b-instruct-q4_K_M"
   analysis:
     max_concurrent_analyses: 1
     analysis_timeout: 120

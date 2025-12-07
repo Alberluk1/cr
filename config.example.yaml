@@ -9,10 +9,10 @@ llm:
     base_url: "http://localhost:11434"
     models:
       council:
-        - "mistral:7b-instruct-q4_K_M"
-        - "llama3.2:3b-instruct-q4_K_M"
-        - "qwen2.5:7b-instruct-q4_K_M"
-        - "gemma2:2b-instruct-q4_K_S"
+        - "mistral:7b-instruct-q4_K_M"     # Аналитик (7b)
+        - "llama3.2:3b-instruct-q4_K_M"    # Быстрый оценщик (3b)
+        - "qwen2.5:3b-instruct-q4_K_M"     # Тех-эксперт (3b)
+        - "gemma2:2b-instruct-q4_K_S"      # Лёгкий сканер (2b)
       chairman: "mistral:7b-instruct-q4_K_M"
   analysis:
     max_concurrent_analyses: 1
