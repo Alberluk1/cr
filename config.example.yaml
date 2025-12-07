@@ -1,0 +1,67 @@
+# Конфигурация Crypto Alpha Scout
+system:
+  name: "Crypto Alpha Scout LLM Council"
+  version: "1.0.0"
+  debug: true
+
+llm:
+  ollama:
+    base_url: "http://localhost:11434"
+    models:
+      council:
+        - "mistral:7b-instruct-q4_K_M"
+        - "llama3.2:3b-instruct-q4_K_M"
+        - "qwen2.5:7b-instruct-q4_K_M"
+        - "gemma2:2b-instruct-q4_K_S"
+      chairman: "mistral:7b-instruct-q4_K_M"
+  analysis:
+    max_concurrent_analyses: 1
+    analysis_timeout: 120    # секунд
+    temperature: 0.7
+    max_tokens: 2048
+
+scanner:
+  interval: 1800             # секунд (30 минут)
+  max_projects_per_scan: 20
+  sources:
+    github:
+      enabled: true
+      api_rate_limit: 10     # запросов в минуту
+    defillama:
+      enabled: true
+    twitter:
+      enabled: false         # требует API ключ
+    discord:
+      enabled: false         # требует webhooks
+  filters:
+    min_project_age_days: 0
+    categories:
+      - "DeFi"
+      - "NFT"
+      - "L1/L2"
+      - "Infrastructure"
+      - "Gaming"
+
+database:
+  path: "data/crypto_projects.db"
+  backup_interval: 86400     # секунд (24 часа)
+  max_records: 10000
+
+notifications:
+  telegram:
+    enabled: true
+    token: "8246586845:AAG2fGI6YZ719M39u_coxcPr1gTf6OVTrqw"                # TELEGRAM_BOT_TOKEN
+    chat_id: "-4746149710"              # TELEGRAM_CHAT_ID
+    alert_threshold: 8.0
+
+web_interface:
+  enabled: true
+  port: 8000
+  host: "0.0.0.0"
+  auth_required: false
+
+logging:
+  level: "INFO"
+  file: "logs/crypto_scout.log"
+  max_size_mb: 10
+  backup_count: 5

@@ -1,0 +1,67 @@
+import aiohttp
+from typing import List, Dict, Optional, Any
+from contextlib import asynccontextmanager
+
+
+class OllamaClient:
+    """Простой клиент для Ollama API."""
+
+    def __init__(self, base_url: str = "http://localhost:11434"):
+        self.base_url = base_url.rstrip("/")
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    @asynccontextmanager
+    async def session(self):
+        """Контекстный менеджер для сессии."""
+        self._session = aiohttp.ClientSession()
+        try:
+            yield self
+        finally:
+            if self._session:
+                await self._session.close()
+                self._session = None
+
+    async def chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        num_predict: int = 2048,
+        top_p: float = 0.9,
+        timeout: int = 120,
+    ) -> str:
+        """Асинхронный запрос к Ollama API."""
+        if not self._session:
+            self._session = aiohttp.ClientSession()
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": num_predict,
+                "top_p": top_p,
+            },
+        }
+
+        async with self._session.post(
+            f"{self.base_url}/api/chat", json=payload, timeout=timeout
+        ) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get("message", {}).get("content", "")
+            return f"Error: {response.status} - {await response.text()}"
+
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs: Any,
+    ) -> str:
+        messages: List[Dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return await self.chat_completion(model=model, messages=messages, **kwargs)
