@@ -16,6 +16,11 @@ class AdvancedAnalyzer:
             "llama3.2:3b-instruct-q4_K_M"
         ]
         self.base_url = cfg.get("base_url", "http://localhost:11434")
+        # Совместимость с main_service ожиданиями
+        self.analysis_cfg = cfg.get("analysis", {}) or {}
+        # Значения по умолчанию для задержек/таймаутов
+        self.analysis_cfg.setdefault("analysis_timeout", 60)
+        self.analysis_cfg.setdefault("delay_between", 5)
 
     async def analyze_with_consensus(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
         prompt = (

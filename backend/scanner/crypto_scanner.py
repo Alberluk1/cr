@@ -150,7 +150,19 @@ class CryptoTracker:
                             level="WARNING",
                         )
                         return []
-                    data = await response.json()
+                    try:
+                        data = await response.json()
+                    except Exception as e_json:
+                        body_preview = (await response.text())[:200]
+                        await log_detailed(
+                            "SCAN",
+                            "defillama_json_error",
+                            data=url,
+                            status=str(e_json),
+                            level="ERROR",
+                            details={"body": body_preview},
+                        )
+                        return []
                     for protocol in data:
                         listed = protocol.get("listedAt")
                         if not listed:
