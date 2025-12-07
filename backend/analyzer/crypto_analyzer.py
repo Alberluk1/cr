@@ -86,51 +86,42 @@ class CryptoAnalyzer:
         chairman_model = self._resolved_chairman or ""
 
         async with OllamaClient(self.base_url).session() as client:
+            def safe_gen(model_name: str, prompt: str) -> str:
+                return prompt  # placeholder for type
+
+            async def gen(model_name: str, prompt: str) -> str:
+                try:
+                    return await client.generate(
+                        model_name,
+                        prompt,
+                        temperature=temperature,
+                        num_predict=num_predict,
+                        timeout=timeout,
+                    )
+                except Exception as e:
+                    return json.dumps({"error": str(e), "model": model_name})
+
             analyst_prompt = ANALYST_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2),
             )
-            analyst_res = await client.generate(
-                models[0],
-                analyst_prompt,
-                temperature=temperature,
-                num_predict=num_predict,
-                timeout=timeout,
-            )
+            analyst_res = await gen(models[0], analyst_prompt)
 
             risk_prompt = RISK_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2)
             )
-            risk_res = await client.generate(
-                models[1],
-                risk_prompt,
-                temperature=temperature,
-                num_predict=num_predict,
-                timeout=timeout,
-            )
+            risk_res = await gen(models[1], risk_prompt)
 
             tech_prompt = TECH_PROMPT.format(
                 project_data=json.dumps(project_data, indent=2)
             )
-            tech_res = await client.generate(
-                models[2],
-                tech_prompt,
-                temperature=temperature,
-                num_predict=num_predict,
-                timeout=timeout,
-            )
+            tech_res = await gen(models[2], tech_prompt)
 
             chairman_prompt = CHAIRMAN_PROMPT.format(
                 analysis1=analyst_res,
                 analysis2=risk_res,
                 analysis3=tech_res,
             )
-            final_res = await client.generate(
-                chairman_model,
-                chairman_prompt,
-                temperature=temperature,
-                num_predict=num_predict,
-                timeout=timeout,
-            )
+            final_res = await gen(chairman_model, chairman_prompt)
 
         return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
 
