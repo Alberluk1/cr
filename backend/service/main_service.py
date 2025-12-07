@@ -40,10 +40,14 @@ class CryptoAlphaService:
                 "sources_completed",
                 status=f"{time.time() - scan_start:.1f}s",
             )
+            await send_telegram_message(f"📊 Источники просканированы за {time.time() - scan_start:.1f}s")
 
             projects = await self.get_unanalyzed_projects()
             limit = self.scan_cfg.get("max_projects_per_scan", 20)
             for project in projects[:limit]:
+                await send_telegram_message(
+                    f"🔎 Анализ: {project.get('name','Unknown')} ({project.get('source','unknown')})"
+                )
                 await log_detailed(
                     "ANALYZE",
                     "start",
@@ -59,6 +63,10 @@ class CryptoAlphaService:
                     data=project.get("name", "Unknown"),
                     status=f"{duration:.1f}s",
                     details={"score": analysis.get("final_decision", {}).get("final_score", "N/A")},
+                )
+                await send_telegram_message(
+                    f"✅ Анализ завершен: {project.get('name','Unknown')} за {duration:.1f}s "
+                    f"score={analysis.get('final_decision', {}).get('final_score','N/A')}"
                 )
                 await self.save_analysis(project["id"], analysis)
                 await self._notify_project(project, analysis)

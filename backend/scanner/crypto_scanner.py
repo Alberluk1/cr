@@ -8,6 +8,7 @@ from typing import Dict, List, Any
 
 from backend.config import get_db_path, get_scanner_config
 from backend.bot.telegram_logger import log_detailed
+from backend.telegram_client import send_message as send_telegram_message
 
 
 def _ensure_dir(path: str) -> None:
@@ -177,6 +178,7 @@ class CryptoTracker:
     async def run_full_scan(self) -> List[Dict[str, Any]]:
         """Полное сканирование (параллельно по источникам)."""
         await log_detailed("SCAN", "run_full_scan_start")
+        await send_telegram_message("🛰️ Запуск сканирования источников")
         tasks = [self.scan_github(), self.scan_defi_llama()]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -189,6 +191,7 @@ class CryptoTracker:
             "run_full_scan_done",
             status=f"total={len(all_projects)}",
         )
+        await send_telegram_message(f"🛰️ Сканирование завершено, найдено {len(all_projects)} проектов")
         await self.save_projects(all_projects)
         return all_projects
 
