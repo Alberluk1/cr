@@ -77,65 +77,56 @@ class CryptoAnalyzer:
 
     async def analyze_project(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
         """Полный анализ проекта через LLM Council."""
-        temperature = self.analysis_cfg.get("temperature", 0.7)
-        num_predict = self.analysis_cfg.get("max_tokens", 2048)
-        timeout = self.analysis_cfg.get("analysis_timeout", 120)
-
-        await self._resolve_models()
-        models = self._resolved_council or []
-        chairman_model = self._resolved_chairman or ""
-
-        async with OllamaClient(self.base_url).session() as client:
-            def safe_gen(model_name: str, prompt: str) -> str:
-                return prompt  # placeholder for type
-
-            async def gen(model_name: str, prompt: str) -> str:
-                try:
-                    return await client.generate(
-                        model_name,
-                        prompt,
-                        temperature=temperature,
-                        num_predict=num_predict,
-                        timeout=timeout,
-                    )
-                except Exception as e:
-                    return json.dumps({"error": str(e), "model": model_name})
-
-            analyst_prompt = ANALYST_PROMPT.format(
-                project_data=json.dumps(project_data, indent=2),
-            )
-            analyst_res = await gen(models[0], analyst_prompt)
-
-            risk_prompt = RISK_PROMPT.format(
-                project_data=json.dumps(project_data, indent=2)
-            )
-            risk_res = await gen(models[1], risk_prompt)
-
-            tech_prompt = TECH_PROMPT.format(
-                project_data=json.dumps(project_data, indent=2)
-            )
-            tech_res = await gen(models[2], tech_prompt)
-
-            chairman_prompt = CHAIRMAN_PROMPT.format(
-                analysis1=analyst_res,
-                analysis2=risk_res,
-                analysis3=tech_res,
-            )
-        final_res = await gen(chairman_model, chairman_prompt)
-
         try:
+            temperature = self.analysis_cfg.get("temperature", 0.7)
+            num_predict = self.analysis_cfg.get("max_tokens", 2048)
+            timeout = self.analysis_cfg.get("analysis_timeout", 120)
+
+            await self._resolve_models()
+            models = self._resolved_council or []
+            chairman_model = self._resolved_chairman or ""
+
+            async with OllamaClient(self.base_url).session() as client:
+                async def gen(model_name: str, prompt: str) -> str:
+                    try:
+                        return await client.generate(
+                            model_name,
+                            prompt,
+                            temperature=temperature,
+                            num_predict=num_predict,
+                            timeout=timeout,
+                        )
+                    except Exception as e:
+                        return json.dumps({"error": str(e), "model": model_name})
+
+                analyst_prompt = ANALYST_PROMPT.format(
+                    project_data=json.dumps(project_data, indent=2),
+                )
+                analyst_res = await gen(models[0], analyst_prompt)
+
+                risk_prompt = RISK_PROMPT.format(
+                    project_data=json.dumps(project_data, indent=2)
+                )
+                risk_res = await gen(models[1], risk_prompt)
+
+                tech_prompt = TECH_PROMPT.format(
+                    project_data=json.dumps(project_data, indent=2)
+                )
+                tech_res = await gen(models[2], tech_prompt)
+
+                chairman_prompt = CHAIRMAN_PROMPT.format(
+                    analysis1=analyst_res,
+                    analysis2=risk_res,
+                    analysis3=tech_res,
+                )
+                final_res = await gen(chairman_model, chairman_prompt)
+
             return self._parse_results(analyst_res, risk_res, tech_res, final_res, project_data)
         except Exception as e:
             return {
                 "project_id": project_data.get("id"),
                 "project_name": project_data.get("name"),
-                "error": f"parse_error: {e}",
-                "raw": {
-                    "analyst": analyst_res,
-                    "risk": risk_res,
-                    "tech": tech_res,
-                    "final": final_res,
-                },
+                "error": f"analyze_exception: {e}",
                 "analyzed_at": datetime.now(tz=timezone.utc).isoformat(),
             }
 
