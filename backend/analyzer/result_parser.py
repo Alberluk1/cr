@@ -18,6 +18,7 @@ def safe_load_json(text: str) -> Dict[str, Any]:
             score = (
                 data.get("score")
                 or data.get("scorenumeric")
+                or data.get("scoreNumeric")
                 or data.get("Score")
                 or data.get("score_numeric")
                 or 0

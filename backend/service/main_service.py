@@ -80,7 +80,7 @@ class CryptoAlphaService:
                     )
                     duration = time.time() - start
                     inv = analysis.get("final_decision", {}).get("investment_analysis", {})
-                    score_val = inv.get("score_numeric", inv.get("final_score", "N/A"))
+                    score_val = inv.get("score_numeric") or inv.get("final_score") or "N/A"
                     await log_detailed(
                         "ANALYZE",
                         "done",

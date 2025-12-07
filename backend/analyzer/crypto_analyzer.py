@@ -169,10 +169,12 @@ class CryptoAnalyzer:
                     return {
                         "investment_analysis": {
                             "score_numeric": inv.get("scorenumeric")
+                            or inv.get("scoreNumeric")
                             or inv.get("score")
                             or inv.get("score_numeric")
                             or inv.get("finalscore")
-                            or inv.get("final_score"),
+                            or inv.get("final_score")
+                            or "N/A",
                             "verdict": inv.get("verdict"),
                             "reason": inv.get("reason") or inv.get("summary"),
                             "confidence": inv.get("confidence"),
@@ -183,10 +185,12 @@ class CryptoAnalyzer:
                     return {
                         "investment_analysis": {
                             "score_numeric": data.get("scorenumeric")
+                            or data.get("scoreNumeric")
                             or data.get("score")
                             or data.get("score_numeric")
                             or data.get("finalscore")
-                            or data.get("final_score"),
+                            or data.get("final_score")
+                            or "N/A",
                             "verdict": data.get("verdict"),
                             "reason": data.get("reason") or data.get("summary"),
                             "confidence": data.get("confidence"),
