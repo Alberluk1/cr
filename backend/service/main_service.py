@@ -9,7 +9,8 @@ import schedule
 
 from backend.config import get_notifications_config, get_scanner_config, get_db_path
 from backend.scanner.crypto_scanner import CryptoTracker
-from backend.analyzer.crypto_analyzer import CryptoAnalyzer
+from backend.analyzer.advanced_analyzer import AdvancedAnalyzer
+from backend.analyzer.strategy_generator import StrategyGenerator
 from backend.telegram_client import send_message as send_telegram_message
 from backend.bot.telegram_logger import log_detailed
 from backend.model_checker import check_models
@@ -20,7 +21,8 @@ class CryptoAlphaService:
 
     def __init__(self):
         self.tracker = CryptoTracker()
-        self.analyzer = CryptoAnalyzer()
+        self.analyzer = AdvancedAnalyzer()
+        self.strategy_gen = StrategyGenerator()
         self.notifications_cfg = get_notifications_config()
         self.scan_cfg = get_scanner_config()
         self.running = False
@@ -82,10 +84,10 @@ class CryptoAlphaService:
                     inv_block = analysis.get("final_decision", {})
                     if not isinstance(inv_block, dict):
                         inv_block = {}
-                    inv = inv_block.get("investment_analysis", {})
+                    inv = inv_block.get("investment_analysis", inv_block)
                     if not isinstance(inv, dict):
                         inv = {}
-                    score_val = inv.get("score_numeric") or inv.get("final_score") or "N/A"
+                    score_val = inv.get("score_numeric") or inv.get("final_score") or analysis.get("score") or "N/A"
                     await log_detailed(
                         "ANALYZE",
                         "done",
@@ -107,11 +109,16 @@ class CryptoAlphaService:
                         )
                         await self._notify_error(f"Ошибка анализа {project.get('id')}: {analysis.get('error')}")
                         continue
-                    else:
-                        await self.save_analysis(project["id"], analysis)
-                        await self._notify_project(project, analysis)
-                        if await self.should_notify(analysis):
-                            await self.send_notification(project, analysis)
+                    # Генерация стратегии
+                    try:
+                        score_for_strategy = inv.get("score_numeric") or analysis.get("score") or 0
+                        strategy = self.strategy_gen.generate_strategy(project, score_for_strategy)
+                        analysis["strategy"] = strategy
+                    except Exception:
+                        strategy = None
+                    await self.save_analysis(project["id"], analysis)
+                    if await self.should_notify(analysis):
+                        await self.send_notification(project, analysis)
                 except asyncio.TimeoutError:
                     await log_detailed(
                         "ANALYZE",
