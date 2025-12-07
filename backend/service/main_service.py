@@ -271,21 +271,8 @@ class CryptoAlphaService:
         self.running = False
 
     async def _notify_project(self, project: Dict[str, Any], analysis: Dict[str, Any]):
-        """Отправка краткого уведомления о новом анализе (только high score)."""
-        final = analysis.get("final_decision", {}) or {}
-        inv = final.get("investment_analysis", final)
-        score = inv.get("score_numeric", inv.get("final_score", 0)) or 0
-        verdict = inv.get("recommendation", inv.get("verdict", "N/A"))
-        if score < 8:
-            return
-        text = (
-            "🚀 Высокий потенциал\n"
-            f"*{project.get('name', 'Unknown')}* ({project.get('source', 'unknown')})\n"
-            f"Оценка: *{score}/10* | Вердикт: *{verdict}*\n"
-            f"Категория: {project.get('category', 'Unknown')}\n"
-            f"ID: `{project.get('id')}`"
-        )
-        await send_telegram_message(text)
+        """Отключено, чтобы не дублировать уведомления (используем send_notification)."""
+        return
 
     async def _notify_scan_complete(self):
         """Краткое уведомление о завершении сканирования/анализа."""
