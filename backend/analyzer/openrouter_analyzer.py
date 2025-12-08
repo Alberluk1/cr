@@ -176,14 +176,8 @@ class EnsembleOpenRouterAnalyzer:
             base_url="https://openrouter.ai/api/v1",
             default_headers=default_headers,
         )
-        # Free endpoints list (per OpenRouter free tier)
-        self.models = models or [
-            "mistralai/mistral-7b-instruct:free",
-            "google/gemma-2b-it:free",
-            "meta-llama/llama-3.1-8b-instruct:free",
-            "huggingfaceh4/zephyr-7b-beta:free",
-            "openchat/openchat-7b:free",
-        ]
+        # Use only the primary model
+        self.models = models or ["mistralai/mistral-7b-instruct:free"]
         self.single = [OpenRouterAnalyzer(self.client, m) for m in self.models]
 
     async def analyze_project(self, project: Dict[str, Any]) -> Dict[str, Any]:
