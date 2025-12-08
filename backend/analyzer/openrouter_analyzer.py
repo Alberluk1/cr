@@ -3,73 +3,78 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-
 PROMPT_TEMPLATE = """
-Ты — институциональный крипто-инвестор. Дай конкретный, реалистичный анализ проекта.
-Всегда отвечай ТОЛЬКО JSON в формате ниже, без лишнего текста.
+You are a critical crypto investment analyst. Produce ONLY valid JSON, no prose.
 
-ДАННЫЕ ПРОЕКТА
-- Название: {name}
-- Категория: {category}
-- TVL: ${tvl:,.0f}
-- Описание: {description}
-- Токен: {token_symbol}
+Project:
+- Name: {name}
+- Category: {category}
+- TVL (USD): {tvl:,.0f}
+- Description: {description}
+- Token symbol: {token_symbol}
 
-ПРАВИЛА
-- Не используй шаблонные фразы и пустые советы.
-- Реалистичный потенциал по TVL:
-  * <50k  -> 1-2x
+Rules:
+- If the project has no tradable token, say so clearly.
+- Use the TVL bands to cap realistic growth:
+  * <50k -> 1-2x
   * 50k-200k -> 2-3x
   * 200k-500k -> 3-5x
-  * >500k -> 3-5x максимум
-- Один главный риск, один конкретный план действий.
-- Если токена нет — напиши, что это сервис, инвестировать можно только через использование.
-- Если не знаешь — пиши "неизвестно".
+  * >500k -> 3-5x
+- No generic advice like "enter gradually". Be specific.
+- If data is unknown, write "unknown", do not invent.
 
-ФОРМАТ ОТВЕТА (ТОЛЬКО JSON):
+Return JSON exactly in this shape:
 {{
   "score": 1-10,
   "verdict": "STRONG_BUY/BUY/HOLD/AVOID/SCAM",
-  "summary": "краткое описание проекта",
-  "where_to_buy": "dex/cex/нельзя купить",
+  "summary": "one sentence what this project is",
+  "has_token": true/false,
+  "token_symbol": "XXX or unknown",
+  "where_to_buy": "dex/cex/ido/unknown",
   "realistic_growth": "1-2x/2-3x/3-5x",
-  "main_risk": "один риск",
-  "plan": "конкретные шаги инвестору"
+  "main_risk": "one specific biggest risk",
+  "plan": "concrete next action for an investor"
 }}
 """
 
 
 class OpenRouterAnalyzer:
     """
-    Анализатор, использующий OpenRouter (OpenAI совместимый API).
-    Требует переменную окружения OPENROUTER_API_KEY.
+    Lightweight analyzer that calls OpenRouter (OpenAI-compatible API).
+    Requires env OPENROUTER_API_KEY.
     """
 
-    def __init__(self, api_key: str | None = None, model: str | None = None):
-        key = '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'
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
         if not key:
-            raise RuntimeError("OPENROUTER_API_KEY не задан")
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+
+        # Optional, helps OpenRouter identify the app
+        default_headers = {
+            "HTTP-Referer": "http://localhost",
+            "X-Title": "Crypto Alpha Scout",
+        }
 
         self.client = OpenAI(
             api_key=key,
             base_url="https://openrouter.ai/api/v1",
+            default_headers=default_headers,
         )
-        # бесплатные/дешевые модели; можно переключить на другую
         self.model = model or "mistralai/mistral-7b-instruct:free"
 
     def _build_prompt(self, project: Dict[str, Any]) -> str:
         return PROMPT_TEMPLATE.format(
             name=project.get("name", "Unknown"),
             category=project.get("category", "Unknown"),
-            tvl=project.get("metrics", {}).get("tvl", 0),
-            description=project.get("description", ""),
-            token_symbol=project.get("token_symbol") or "нет",
+            tvl=project.get("metrics", {}).get("tvl", 0) or 0,
+            description=project.get("description", "") or "",
+            token_symbol=project.get("token_symbol") or "unknown",
         )
 
     async def analyze_project(self, project: Dict[str, Any]) -> Dict[str, Any]:
@@ -82,18 +87,18 @@ class OpenRouterAnalyzer:
                 lambda: self.client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": "Ты профессиональный крипто-аналитик."},
+                        {"role": "system", "content": "Return only strict JSON."},
                         {"role": "user", "content": prompt},
                     ],
-                    max_tokens=512,
-                    temperature=0.4,
+                    max_tokens=500,
+                    temperature=0.35,
                 ),
             )
             text = completion.choices[0].message.content
-            logger.debug("Ответ OpenRouter: %s", text[:500])
+            logger.debug("OpenRouter raw response: %s", text[:500])
             return self._parse_json(text)
         except Exception as e:
-            logger.error("Ошибка OpenRouter анализа: %s", e, exc_info=True)
+            logger.error("OpenRouter analysis error: %s", e, exc_info=True)
             return self._fallback(project)
 
     def _parse_json(self, text: str) -> Dict[str, Any]:
@@ -105,13 +110,20 @@ class OpenRouterAnalyzer:
             score = float(data.get("score", 5.0))
             data["score"] = max(1, min(10, score))
             data["verdict"] = str(data.get("verdict", "HOLD")).upper()
+            data.setdefault("has_token", False)
+            data.setdefault("token_symbol", "unknown")
+            data.setdefault("where_to_buy", "unknown")
+            data.setdefault("realistic_growth", "1-2x")
+            data.setdefault("main_risk", "unknown")
+            data.setdefault("plan", "collect more data")
+            data.setdefault("summary", "No summary")
             return data
         except Exception as e:
-            logger.warning("Не удалось распарсить JSON: %s", e)
+            logger.warning("Cannot parse JSON from OpenRouter: %s", e)
             return self._fallback()
 
-    def _fallback(self, project: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        tvl = (project or {}).get("metrics", {}).get("tvl", 0)
+    def _fallback(self, project: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        tvl = (project or {}).get("metrics", {}).get("tvl", 0) or 0
         if tvl > 500_000:
             score = 7.0
         elif tvl > 100_000:
@@ -121,9 +133,11 @@ class OpenRouterAnalyzer:
         return {
             "score": score,
             "verdict": "HOLD",
-            "summary": "Недостаточно данных для анализа",
-            "where_to_buy": "неизвестно",
+            "summary": "Fallback analysis; LLM unavailable",
+            "has_token": False,
+            "token_symbol": "unknown",
+            "where_to_buy": "unknown",
             "realistic_growth": "1-2x",
-            "main_risk": "неизвестно",
-            "plan": "требуется ручная проверка",
+            "main_risk": "insufficient data",
+            "plan": "await LLM result",
         }
