@@ -109,7 +109,18 @@ class OpenRouterAnalyzer:
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if not match:
                 raise ValueError("JSON block not found")
-            data = json.loads(match.group())
+            json_str = match.group()
+            # try to drop trailing commas before } or ]
+            json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
+            try:
+                data = json.loads(json_str)
+            except Exception:
+                # last resort: try to trim to last closing brace and load again
+                end_idx = json_str.rfind("}")
+                if end_idx != -1:
+                    data = json.loads(json_str[: end_idx + 1])
+                else:
+                    raise
             score = float(data.get("score", 5.0))
             data["score"] = max(1, min(10, score))
             data["verdict"] = str(data.get("verdict", "HOLD")).upper()
