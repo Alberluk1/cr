@@ -9,11 +9,15 @@ import schedule
 
 from backend.config import get_notifications_config, get_scanner_config, get_db_path
 from backend.scanner.crypto_scanner import CryptoTracker
-from backend.analyzer.advanced_analyzer import AdvancedAnalyzer
+from backend.analyzer.deepseek_analyzer import DeepSeekAnalyzer
 from backend.analyzer.strategy_generator import StrategyGenerator
 from backend.telegram_client import send_message as send_telegram_message
 from backend.bot.telegram_logger import log_detailed
-from backend.model_checker import check_models
+
+
+def check_models():
+    """Заглушка: для DeepSeek моделей не требуется."""
+    return {"available": [], "missing": []}
 
 
 class CryptoAlphaService:
@@ -21,7 +25,7 @@ class CryptoAlphaService:
 
     def __init__(self):
         self.tracker = CryptoTracker()
-        self.analyzer = AdvancedAnalyzer()
+        self.analyzer = DeepSeekAnalyzer()
         self.strategy_gen = StrategyGenerator()
         self.notifications_cfg = get_notifications_config()
         self.scan_cfg = get_scanner_config()

@@ -10,8 +10,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 from backend.scanner.crypto_scanner import CryptoTracker
-from backend.analyzer.advanced_analyzer import AdvancedAnalyzer
-from backend.ollama_client import OllamaClient
+from backend.analyzer.deepseek_analyzer import DeepSeekAnalyzer
 from backend.telegram_client import send_message
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[logging.StreamHandler()])
@@ -19,61 +18,49 @@ logger = logging.getLogger(__name__)
 
 
 def format_message(project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-    """Формат сообщения для отправки в Telegram/лог."""
+    """Формат сообщения для DeepSeek-анализа."""
     name = project.get("name", "Unknown")
     category = project.get("category", "Unknown")
     tvl = project.get("metrics", {}).get("tvl", 0)
     score = analysis.get("score", 0)
     verdict = analysis.get("verdict", "UNKNOWN")
-    quality = analysis.get("quality_assessment", "unknown")
-    growth = analysis.get("realistic_growth_potential") or analysis.get("realistic_growth", "n/a")
-    timeframe = analysis.get("growth_timeframe") or analysis.get("timeframe", "6-12 месяцев")
-
-    strengths = analysis.get("key_strengths") or analysis.get("key_advantages") or []
-    risks = analysis.get("main_risks") or analysis.get("risks") or []
-    team = analysis.get("team_assessment", "н/д")
-    product = analysis.get("product_readiness", "н/д")
 
     inv = analysis.get("investment_recommendation", {}) or {}
-    inv_size = inv.get("size", "н/д")
-    inv_entry = inv.get("entry_strategy", "н/д")
-    exit_signals = inv.get("exit_signals") or analysis.get("exit_signals") or []
+    risks = analysis.get("key_risks") or []
 
     msg = f"""
 🔍 *{name}*
-📊 *Категория:* {category}
-💰 *TVL:* ${tvl:,.0f}
+📊 {category} | 💰 TVL: ${tvl:,.0f}
+🔗 {project.get('url', 'Нет ссылки')}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⭐ *ОЦЕНКА КАЧЕСТВА:* {score}/10
-📈 *ВЕРДИКТ:* {verdict}
-🏆 *КАЧЕСТВО:* {quality}
+⭐ ОЦЕНКА: {score}/10
+📈 ВЕРДИКТ: {verdict}
 
-🎯 *ПОТЕНЦИАЛ РОСТА:* {growth}
-⏱️ *СРОК:* {timeframe}
+💡 ЧТО ЭТО: {analysis.get('project_summary', 'н/д')}
+👥 КОМАНДА: {analysis.get('team_assessment', 'н/д')}
+🛠️ ПРОДУКТ: {analysis.get('product_status', 'н/д')}
+📊 ПОТЕНЦИАЛ: {analysis.get('growth_potential', 'н/д')}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ *КЛЮЧЕВЫЕ ПРЕИМУЩЕСТВА:*
+✅ РЕКОМЕНДАЦИЯ: {"Инвестировать" if inv.get('should_invest') else "Не инвестировать"}
+
+📋 ПЛАН ДЕЙСТВИЙ:
+{inv.get('how_to_invest', 'Нет плана')}
+
+💰 РАЗМЕР ПОЗИЦИИ: {inv.get('position_size', 'Не указан')}
+🎯 УСЛОВИЯ ВХОДА: {inv.get('entry_conditions', 'Не указаны')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ КЛЮЧЕВЫЕ РИСКИ:
 """
-    for s in strengths[:3]:
-        msg += f"• {s}\n"
-    msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *ОСНОВНЫЕ РИСКИ:*\n"
-    for r in risks[:3]:
-        msg += f"• {r}\n"
+    for risk in risks[:3]:
+        msg += f"• {risk}\n"
 
-    msg += f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👥 *КОМАНДА:* {team}
-🛠️ *ПРОДУКТ:* {product}
+    if analysis.get("critical_events"):
+        msg += f"\n🚨 КРИТИЧЕСКИЕ СОБЫТИЯ:\n{analysis['critical_events']}\n"
 
-💼 *ИНВЕСТ. РЕКОМЕНДАЦИЯ:*
-• Размер: {inv_size}
-• Стратегия входа: {inv_entry}
-"""
-    if exit_signals:
-        msg += "• Выход: " + "; ".join(exit_signals[:2]) + "\n"
-
-    msg += f"\n🔗 *Ссылка:* {project.get('url', 'Нет ссылки')}\n"
+    msg += f"\n🤖 АНАЛИЗ: DeepSeek AI\n"
     return msg.strip()
 
 
@@ -81,8 +68,7 @@ async def main():
     logger.info("🚀 Crypto Scanner стартует")
 
     scanner = CryptoTracker()
-    ollama_client = OllamaClient()
-    analyzer = AdvancedAnalyzer(ollama_client)
+    analyzer = DeepSeekAnalyzer()
 
     scan_result = await scanner.run_full_scan()
     projects = scan_result if isinstance(scan_result, list) else scan_result.get("projects", [])
@@ -99,19 +85,9 @@ async def main():
         analysis = await analyzer.analyze_project(project)
 
         message = format_message(project, analysis)
-        # Отправка в Telegram
         await send_message(message)
 
-        # Дополнительный лог качества/роста
-        if analysis and "quality_assessment" in analysis:
-            logger.info(
-                f"✅ {project.get('name')}: качество {analysis.get('quality_assessment')}, "
-                f"потенциал {analysis.get('realistic_growth_potential') or analysis.get('realistic_growth', 'n/a')}"
-            )
-        else:
-            logger.warning(f"⚠️ Старый формат анализа для {project.get('name')}")
-
-        # Небольшая пауза, чтобы не спамить GPU/LLM
+        # Небольшая пауза
         await asyncio.sleep(1)
 
     logger.info("✅ Анализ завершен")
