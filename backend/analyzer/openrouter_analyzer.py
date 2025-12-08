@@ -23,9 +23,9 @@ PROMPT_TEMPLATE = """
 - Если нет торгуемого токена, has_token=false, token_symbol="unknown", exchanges=[] и buy_links=[].
 - Найди контрактный адрес токена (если он есть); если неизвестен — пиши "unknown".
 - Генерируй ПРЯМЫЕ ссылки на пары (если есть контракт):
-  * Uniswap: https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency={CONTRACT_ADDRESS}
-  * PancakeSwap: https://pancakeswap.finance/swap?inputCurrency=BNB&outputCurrency={CONTRACT_ADDRESS}
-  * 1inch: https://app.1inch.io/#/1/swap/ETH/{CONTRACT_ADDRESS}
+  * Uniswap: https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency=CONTRACT_ADDRESS
+  * PancakeSwap: https://pancakeswap.finance/swap?inputCurrency=BNB&outputCurrency=CONTRACT_ADDRESS
+  * 1inch: https://app.1inch.io/#/1/swap/ETH/CONTRACT_ADDRESS
 - Система оценки (старт 6.0/10):
   * TVL > $100M: +2; TVL < $1M: -2
   * Низкая ликвидность: -2
