@@ -61,26 +61,11 @@ PROMPT_TEMPLATE = """
 
 class OpenRouterAnalyzer:
     """
-    Lightweight analyzer that calls OpenRouter (OpenAI-compatible API).
-    Requires env OPENROUTER_API_KEY.
+    Lightweight single-model analyzer for OpenRouter (OpenAI-compatible API).
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
-
-        # Optional, helps OpenRouter identify the app
-        default_headers = {
-            "HTTP-Referer": "http://localhost",
-            "X-Title": "Crypto Alpha Scout",
-        }
-
-        self.client = OpenAI(
-            api_key=key,
-            base_url="https://openrouter.ai/api/v1",
-            default_headers=default_headers,
-        )
+    def __init__(self, client: OpenAI, model: str):
+        self.client = client
         self.model = model or "mistralai/mistral-7b-instruct:free"
 
     def _build_prompt(self, project: Dict[str, Any]) -> str:
@@ -162,3 +147,91 @@ class OpenRouterAnalyzer:
             "main_risk": "insufficient data",
             "plan": "await LLM result",
         }
+
+
+class EnsembleOpenRouterAnalyzer:
+    """
+    Ensemble of several free OpenRouter models with simple aggregation.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        models: Optional[list[str]] = None,
+    ):
+        key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+
+        default_headers = {
+            "HTTP-Referer": "http://localhost",
+            "X-Title": "Crypto Alpha Scout",
+        }
+        self.client = OpenAI(
+            api_key=key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers=default_headers,
+        )
+        self.models = models or [
+            "mistralai/mistral-7b-instruct:free",
+            "google/gemma-7b-it:free",
+            "huggingfaceh4/zephyr-7b-beta:free",
+        ]
+        self.single = [OpenRouterAnalyzer(self.client, m) for m in self.models]
+
+    async def analyze_project(self, project: Dict[str, Any]) -> Dict[str, Any]:
+        # Run all models in parallel
+        tasks = [s.analyze_project(project) for s in self.single]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        parsed = []
+        for r in results:
+            if isinstance(r, dict):
+                parsed.append(r)
+
+        if not parsed:
+            return self.single[0]._fallback(project)
+
+        # Aggregate score: average
+        scores = [p.get("score", 5.0) for p in parsed]
+        final_score = max(1, min(10, sum(scores) / len(scores)))
+
+        # Majority verdict
+        verdicts = [p.get("verdict", "HOLD") for p in parsed]
+        verdict = max(set(verdicts), key=verdicts.count)
+
+        # Pick richest links/contract
+        best = max(parsed, key=lambda x: len("".join(x.get("buy_links", []))) + len("".join(x.get("exchanges", []))))
+
+        merged = {
+            "score": final_score,
+            "verdict": verdict,
+            "summary": best.get("summary", ""),
+            "has_token": best.get("has_token", False),
+            "token_symbol": best.get("token_symbol", "unknown"),
+            "contract_address": best.get("contract_address", "unknown"),
+            "where_to_buy": best.get("where_to_buy", "unknown"),
+            "exchanges": best.get("exchanges", []),
+            "buy_links": best.get("buy_links", []),
+            "realistic_growth": best.get("realistic_growth", "1-2x"),
+            "main_risk": best.get("main_risk", "unknown"),
+            "plan": best.get("plan", ""),
+            "rationale": best.get("rationale", ""),
+            "models_used": len(parsed),
+        }
+
+        # If contract unknown -> clear links
+        if merged["contract_address"] == "unknown" or not merged["has_token"]:
+            merged["exchanges"] = []
+            merged["buy_links"] = []
+            merged["where_to_buy"] = "unknown"
+
+        # If risk mentions low liquidity / unknown TVL -> cap score to 5 and verdict max HOLD
+        risk_text = str(merged.get("main_risk", "")).lower()
+        tvl = project.get("metrics", {}).get("tvl", 0) or 0
+        if "ликвид" in risk_text or tvl < 100_000:
+            merged["score"] = min(merged["score"], 5.0)
+            if merged["verdict"] in {"BUY", "STRONG_BUY"}:
+                merged["verdict"] = "HOLD"
+
+        return merged

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from backend.analyzer.openrouter_analyzer import OpenRouterAnalyzer
+from backend.analyzer.openrouter_analyzer import EnsembleOpenRouterAnalyzer
 from backend.scanner.crypto_scanner import CryptoTracker
 from backend.telegram_client import send_message
 
@@ -70,7 +70,7 @@ async def main():
 
     scanner = CryptoTracker()
     try:
-        analyzer = OpenRouterAnalyzer()
+        analyzer = EnsembleOpenRouterAnalyzer()
     except Exception as e:
         logger.error("OPENROUTER_API_KEY is not set or invalid: %s", e)
         await send_message("⚠️ OPENROUTER_API_KEY not configured.")
