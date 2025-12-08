@@ -10,51 +10,53 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 PROMPT_TEMPLATE = """
-Ты DeFi-инвестор с 5+ лет опыта. Верни ТОЛЬКО валидный JSON, без текста вне JSON.
+ТЫ: ВЕДУЩИЙ DeFi-ИССЛЕДОВАТЕЛЬ С ФОНДОМ $500M. ТЫ КРАЙНЕ ОСТОРОЖЕН. Верни ТОЛЬКО валидный JSON, без текста вне JSON.
 
-Данные:
+ДАННЫЕ ДЛЯ АНАЛИЗА:
 - Название: {name}
 - Категория: {category}
 - TVL (USD): {tvl:,.0f}
 - Описание: {description}
+- Сайт: {url}
 - Токен (если известен): {token_symbol}
 
-Правила:
-- Если нет торгуемого токена, has_token=false, token_symbol="unknown", exchanges=[] и buy_links=[].
-- Найди контрактный адрес токена (если он есть); если неизвестен — пиши "unknown".
-- Генерируй ПРЯМЫЕ ссылки на пары (если есть контракт):
-  * Uniswap: https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency=CONTRACT_ADDRESS
-  * PancakeSwap: https://pancakeswap.finance/swap?inputCurrency=BNB&outputCurrency=CONTRACT_ADDRESS
-  * 1inch: https://app.1inch.io/#/1/swap/ETH/CONTRACT_ADDRESS
-- Система оценки (старт 6.0/10):
-  * TVL > $100M: +2; TVL < $1M: -2
-  * Низкая ликвидность: -2
-  * Высокая конкуренция: -1
-  * Команда известная: +1
-  * Проект новый (<6 мес): -1
-  * Если риски высокие — финальная оценка не выше 5.0
-- Реалистичный потенциал по TVL:
-  * <50k  -> 1-2x
-  * 50k-200k -> 2-3x
-  * 200k-500k -> 3-5x
-  * >500k -> 3-5x (не выше)
-- План действий: чёткие шаги (вход/докупка/стоп/цели).
-- Если данных нет — пиши "unknown", не выдумывай.
+МЕТОДОЛОГИЯ:
+- Контекст категории и конкурентов.
+- Фундаментал: TVL, активность, команда, технология.
+- Риск/доходность, временной фактор, восприятие сообщества.
+- Не выдумывай. Если нет данных — "unknown".
 
-Верни JSON строго такого вида:
+ФОРМАТ ОТВЕТА (JSON):
 {{
-  "score": 1-10,
-  "verdict": "STRONG_BUY/BUY/HOLD/AVOID/SCAM",
-  "summary": "кратко что это за проект (по-русски)",
-  "has_token": true/false,
+  "research_summary": "3-4 предложения вывода",
+  "strengths": ["1-3 проверенные сильные стороны"],
+  "weaknesses": ["1-3 критические слабости"],
+  "competitive_position": "leader/mid/outsider",
+  "rating": "X.X/10",
+  "rating_breakdown": {{
+    "fundamentals": "X.X/3",
+    "team_tech": "X.X/3",
+    "market_fit": "X.X/2",
+    "risk_level": "X.X/2"
+  }},
+  "verdict": "STRONG_BUY/BUY/HOLD/SELL/STRONG_SELL",
+  "verdict_explanation": "почему этот вердикт",
+  "realistic_potential": "0-1x/1-2x/2-3x/3-5x/5x+ (реалистично)",
+  "investment_plan": {{
+    "entry_strategy": "условия входа/объем",
+    "risk_management": "стоп-лоссы/диверсификация",
+    "exit_strategy": "когда выходить",
+    "time_horizon": "срок"
+  }},
+  "key_risks": ["1-3 главных риска"],
+  "next_research_steps": ["что проверить дальше"],
+  "confidence_level": "HIGH/MEDIUM/LOW",
+  "data_limitations": "каких данных нет",
   "token_symbol": "XXX или unknown",
   "contract_address": "0x... или unknown",
   "exchanges": ["Binance", "Uniswap"] или [],
   "buy_links": ["https://..."] или [],
-  "where_to_buy": "dex/cex/ido/unknown",
-  "realistic_growth": "1-2x/2-3x/3-5x",
-  "main_risk": "один главный риск",
-  "plan": "конкретный следующий шаг для инвестора (по-русски)"
+  "where_to_buy": "dex/cex/ido/unknown"
 }}
 """
 
@@ -75,6 +77,7 @@ class OpenRouterAnalyzer:
             tvl=project.get("metrics", {}).get("tvl", 0) or 0,
             description=project.get("description", "") or "",
             token_symbol=project.get("token_symbol") or "unknown",
+            url=project.get("url", "unknown"),
         )
 
     async def analyze_project(self, project: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,16 +113,17 @@ class OpenRouterAnalyzer:
             score = float(data.get("score", 5.0))
             data["score"] = max(1, min(10, score))
             data["verdict"] = str(data.get("verdict", "HOLD")).upper()
+            # legacy fields for downstream formatting
+            data.setdefault("summary", data.get("research_summary", "No summary"))
             data.setdefault("has_token", False)
             data.setdefault("token_symbol", "unknown")
             data.setdefault("contract_address", "unknown")
             data.setdefault("where_to_buy", "unknown")
             data.setdefault("exchanges", [])
             data.setdefault("buy_links", [])
-            data.setdefault("realistic_growth", "1-2x")
-            data.setdefault("main_risk", "unknown")
-            data.setdefault("plan", "collect more data")
-            data.setdefault("summary", "No summary")
+            data.setdefault("realistic_growth", data.get("realistic_potential", "1-2x"))
+            data.setdefault("main_risk", ", ".join(data.get("key_risks", [])[:1]) or "unknown")
+            data.setdefault("plan", data.get("investment_plan", {}).get("entry_strategy", "collect more data"))
             return data
         except Exception as e:
             logger.warning("Cannot parse JSON from OpenRouter: %s", e)
