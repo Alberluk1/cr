@@ -1,92 +1,120 @@
 import asyncio
 import logging
-import sys
 import os
+import sys
+from pathlib import Path
+from typing import Dict, Any
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from scanner.crypto_scanner import CryptoTracker
-from analyzer.advanced_analyzer import AdvancedAnalyzer
-import ollama
+from backend.scanner.crypto_scanner import CryptoTracker
+from backend.analyzer.advanced_analyzer import AdvancedAnalyzer
+from backend.ollama_client import OllamaClient
+from backend.telegram_client import send_message
 
-# Логирование
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[logging.StreamHandler()],
-)
+logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[logging.StreamHandler()])
 logger = logging.getLogger(__name__)
 
 
-async def main():
-    print("\n" + "=" * 50)
-    print("🔍 CRYPTO SCANNER - УПРОЩЕННАЯ ВЕРСИЯ")
-    print("=" * 50 + "\n")
+def format_message(project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    """Формат сообщения для отправки в Telegram/лог."""
+    name = project.get("name", "Unknown")
+    category = project.get("category", "Unknown")
+    tvl = project.get("metrics", {}).get("tvl", 0)
+    score = analysis.get("score", 0)
+    verdict = analysis.get("verdict", "UNKNOWN")
+    quality = analysis.get("quality_assessment", "unknown")
+    growth = analysis.get("realistic_growth_potential") or analysis.get("realistic_growth", "n/a")
+    timeframe = analysis.get("growth_timeframe") or analysis.get("timeframe", "6-12 месяцев")
 
-    try:
-        try:
-            client = ollama.Client()
-            models = client.list()
-            print(f"🤖 Моделей Ollama: {len(models['models'])}")
-            for model in models["models"][:3]:
-                print(f"   • {model['name']}")
-            print()
-        except Exception:
-            print("❌ Запустите Ollama: ollama serve")
-            return
+    strengths = analysis.get("key_strengths") or analysis.get("key_advantages") or []
+    risks = analysis.get("main_risks") or analysis.get("risks") or []
+    team = analysis.get("team_assessment", "н/д")
+    product = analysis.get("product_readiness", "н/д")
 
-        scanner = CryptoTracker()
-        ollama_client = ollama.AsyncClient()
-        analyzer = AdvancedAnalyzer(ollama_client)
+    inv = analysis.get("investment_recommendation", {}) or {}
+    inv_size = inv.get("size", "н/д")
+    inv_entry = inv.get("entry_strategy", "н/д")
+    exit_signals = inv.get("exit_signals") or analysis.get("exit_signals") or []
 
-        print("🛰️ Сканируем DeFi Llama...")
-        scan_result = await scanner.run_full_scan()
-        projects = scan_result if isinstance(scan_result, list) else scan_result.get("projects", [])
+    msg = f"""
+🔍 *{name}*
+📊 *Категория:* {category}
+💰 *TVL:* ${tvl:,.0f}
 
-        if not projects:
-            print("⚠️ Проекты не найдены")
-            return
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⭐ *ОЦЕНКА КАЧЕСТВА:* {score}/10
+📈 *ВЕРДИКТ:* {verdict}
+🏆 *КАЧЕСТВО:* {quality}
 
-        print(f"\n📊 Найдено {len(projects)} проектов для анализа\n")
+🎯 *ПОТЕНЦИАЛ РОСТА:* {growth}
+⏱️ *СРОК:* {timeframe}
 
-        for i, project in enumerate(projects[:5]):
-            print(f"{'='*40}")
-            print(f"#{i+1} {project['name']}")
-            print(f"{'='*40}")
-
-            print(f"📋 Категория: {project.get('category')}")
-            print(f"💰 TVL: ${project.get('metrics', {}).get('tvl', 0):,.0f}")
-
-            if project.get("url"):
-                print(f"🔗 Сайт: {project.get('url')}")
-
-            print("\n🤖 Анализ LLM...")
-            analysis = await analyzer.analyze_project(project)
-
-            if analysis:
-                message = f"""
-🔍 {project.get('name')}
-💰 TVL: ${project.get('metrics', {}).get('tvl', 0):,.0f}
-📊 {project.get('category')}
-⭐ Оценка: {analysis.get('score')}/10
-📈 Вердикт: {analysis.get('verdict')}
-💡 {analysis.get('summary')}
-🔗 {project.get('url', 'Нет ссылки')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ *КЛЮЧЕВЫЕ ПРЕИМУЩЕСТВА:*
 """
-                print(message)
+    for s in strengths[:3]:
+        msg += f"• {s}\n"
+    msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *ОСНОВНЫЕ РИСКИ:*\n"
+    for r in risks[:3]:
+        msg += f"• {r}\n"
 
-            print()
+    msg += f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👥 *КОМАНДА:* {team}
+🛠️ *ПРОДУКТ:* {product}
 
-            if i < 4:
-                await asyncio.sleep(1)
+💼 *ИНВЕСТ. РЕКОМЕНДАЦИЯ:*
+• Размер: {inv_size}
+• Стратегия входа: {inv_entry}
+"""
+    if exit_signals:
+        msg += "• Выход: " + "; ".join(exit_signals[:2]) + "\n"
 
-        print("\n✅ Анализ завершен!")
+    msg += f"\n🔗 *Ссылка:* {project.get('url', 'Нет ссылки')}\n"
+    return msg.strip()
 
-    except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
-        import traceback
 
-        traceback.print_exc()
+async def main():
+    logger.info("🚀 Crypto Scanner стартует")
+
+    scanner = CryptoTracker()
+    ollama_client = OllamaClient()
+    analyzer = AdvancedAnalyzer(ollama_client)
+
+    scan_result = await scanner.run_full_scan()
+    projects = scan_result if isinstance(scan_result, list) else scan_result.get("projects", [])
+
+    if not projects:
+        logger.warning("Проекты не найдены")
+        return
+
+    logger.info(f"📊 Найдено {len(projects)} проектов для анализа")
+
+    # Анализируем до 10 проектов
+    for idx, project in enumerate(projects[:10], 1):
+        logger.info(f"🔎 Анализ {idx}/{min(10, len(projects))}: {project.get('name')}")
+        analysis = await analyzer.analyze_project(project)
+
+        message = format_message(project, analysis)
+        # Отправка в Telegram
+        await send_message(message)
+
+        # Дополнительный лог качества/роста
+        if analysis and "quality_assessment" in analysis:
+            logger.info(
+                f"✅ {project.get('name')}: качество {analysis.get('quality_assessment')}, "
+                f"потенциал {analysis.get('realistic_growth_potential') or analysis.get('realistic_growth', 'n/a')}"
+            )
+        else:
+            logger.warning(f"⚠️ Старый формат анализа для {project.get('name')}")
+
+        # Небольшая пауза, чтобы не спамить GPU/LLM
+        await asyncio.sleep(1)
+
+    logger.info("✅ Анализ завершен")
 
 
 if __name__ == "__main__":

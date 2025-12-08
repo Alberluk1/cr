@@ -1,14 +1,20 @@
 import asyncio
-import aiohttp
-from typing import List, Dict, Optional, Any
-from contextlib import asynccontextmanager
+import json
 import time
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
+
+import aiohttp
+import httpx
 
 from backend.bot.telegram_logger import log_detailed
 
 
 class OllamaClient:
-    """Простой клиент для Ollama API."""
+    """
+    Небольшой async‑клиент для Ollama.
+    Совместим с интерфейсом AsyncClient.chat (возвращает {"message": {"content": ...}}).
+    """
 
     def __init__(self, base_url: str = "http://localhost:11434"):
         self.base_url = base_url.rstrip("/")
@@ -16,7 +22,7 @@ class OllamaClient:
 
     @asynccontextmanager
     async def session(self):
-        """Контекстный менеджер для сессии."""
+        """Контекстный менеджер для повторного использования aiohttp-сессии."""
         self._session = aiohttp.ClientSession()
         try:
             yield self
@@ -33,11 +39,16 @@ class OllamaClient:
         num_predict: int = 2048,
         top_p: float = 0.9,
         timeout: int = 120,
+        **kwargs: Any,
     ) -> str:
-        """Асинхронный запрос к Ollama API."""
+        """
+        Вызов /api/chat без стриминга.
+        Принимает произвольные **kwargs (например options) для совместимости с AsyncClient.
+        """
         if not self._session:
             self._session = aiohttp.ClientSession()
 
+        extra_options = kwargs.pop("options", {}) or {}
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -46,8 +57,11 @@ class OllamaClient:
                 "temperature": temperature,
                 "num_predict": num_predict,
                 "top_p": top_p,
+                **extra_options,
             },
         }
+        payload.update({k: v for k, v in kwargs.items() if k not in {"options"}})
+
         start = time.time()
         try:
             async with self._session.post(
@@ -93,7 +107,7 @@ class OllamaClient:
         timeout: int = 30,
         **kwargs: Any,
     ) -> str:
-        """Генерация с таймаутом и безопасным возвратом ошибки."""
+        """Упрощенный вызов generate → chat_completion."""
         messages: List[Dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -107,3 +121,24 @@ class OllamaClient:
             return '{"error": "timeout", "message": "LLM timeout"}'
         except Exception as e:
             return json.dumps({"error": str(e), "message": "LLM error"})
+
+    async def chat(self, model: str, messages: List[Dict[str, str]], **options: Any) -> Dict[str, Any]:
+        """
+        Совместимый с ollama.AsyncClient.chat: возвращает dict c message.content.
+        """
+        content = await self.chat_completion(model=model, messages=messages, **options)
+        return {"message": {"content": content}}
+
+    def list(self) -> Dict[str, Any]:
+        """
+        Синхронно возвращает список моделей через /api/tags.
+        """
+        try:
+            resp = httpx.get(f"{self.base_url}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                models = [{"name": m.get("name", "")} for m in data.get("models", [])]
+                return {"models": models}
+        except Exception:
+            pass
+        return {"models": []}

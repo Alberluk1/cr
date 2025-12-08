@@ -1,7 +1,5 @@
-import asyncio
 import logging
-from typing import Dict, List, Any
-from datetime import datetime
+from typing import Any, Dict, List
 
 import aiohttp
 
@@ -9,24 +7,24 @@ logger = logging.getLogger(__name__)
 
 
 class CryptoTracker:
+    """Сканер источников (пока только DeFi Llama)."""
+
     def __init__(self):
         self.defillama_url = "https://api.llama.fi/protocols"
 
     async def _make_request(self, url: str) -> Any:
-        """Безопасный HTTP запрос."""
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(url, timeout=10) as response:
                     if response.status == 200:
                         return await response.json()
                     logger.error(f"HTTP {response.status} для {url}")
-                    return None
             except Exception as e:
                 logger.error(f"Ошибка запроса {url}: {e}")
-                return None
+        return None
 
     async def scan_defi_llama(self) -> List[Dict[str, Any]]:
-        """УМНЫЙ сканер DeFi Llama с правильной фильтрацией."""
+        """Отбираем малые/новые проекты DeFi Llama."""
         projects: List[Dict[str, Any]] = []
         data = await self._make_request(self.defillama_url)
         if not data:
@@ -42,8 +40,7 @@ class CryptoTracker:
                 category = (protocol.get("category") or "").lower()
                 slug = protocol.get("slug", "")
 
-                # фильтры
-                exclude_categories = [
+                exclude_categories = {
                     "bridge",
                     "stablecoin",
                     "cex",
@@ -54,13 +51,15 @@ class CryptoTracker:
                     "farm",
                     "indexes",
                     "derivatives",
-                ]
-                # целимся в диапазон 50k–500k как более качественный сигнал ранних проектов
-                tvl_valid = 50_000 < tvl < 200_000
-                category_valid = category not in exclude_categories
+                    "synthetics",
+                }
+                allowed_categories = {"defi", "dex", "lending", "yield", "infrastructure", "nft", "gaming"}
+                tvl_valid = 50_000 < tvl < 1_000_000
+                growth_valid = float(protocol.get("change_7d", 0) or 0) > 0
+                category_valid = category in allowed_categories
                 has_links = protocol.get("url") and protocol.get("url").strip()
 
-                if not (tvl_valid and category_valid and has_links):
+                if not (tvl_valid and category_valid and has_links and growth_valid):
                     continue
 
                 links = {}
@@ -70,6 +69,7 @@ class CryptoTracker:
                         links[key] = val
 
                 change_7d = float(protocol.get("change_7d", 0) or 0)
+                token_symbol = protocol.get("tokenSymbol") or protocol.get("symbol")
 
                 project = {
                     "id": f"defillama_{slug}",
@@ -78,6 +78,7 @@ class CryptoTracker:
                     "category": category.capitalize(),
                     "source": "defillama",
                     "url": protocol.get("url", ""),
+                    "token_symbol": token_symbol,
                     "links": links,
                     "metrics": {
                         "tvl": tvl,
@@ -89,22 +90,20 @@ class CryptoTracker:
                     "raw_data": protocol,
                 }
                 projects.append(project)
-                logger.info(f"✅ {name} | TVL: ${tvl:,.0f} | Категория: {category}")
             except Exception as e:
                 logger.debug(f"Пропускаем {protocol.get('name', 'unknown')}: {e}")
                 continue
 
         projects.sort(key=lambda x: x["metrics"]["tvl"])
         projects = projects[:15]
-        logger.info(f"🎯 Найдено {len(projects)} качественных проектов")
+        logger.info(f"Отобрано {len(projects)} качественных проектов")
         return projects
 
-    async def run_full_scan(self) -> List[Dict[str, Any]]:
-        """Основной сканер."""
-        logger.info("🛰️ Сканирование DeFi Llama...")
+    async def run_full_scan(self) -> Dict[str, Any]:
+        logger.info("Сканирование DeFi Llama...")
         projects = await self.scan_defi_llama()
         if projects:
-            logger.info(f"📊 Найдено {len(projects)} проектов")
+            logger.info(f"Найдено {len(projects)} проектов")
         else:
-            logger.warning("⚠️ Проекты не найдены")
+            logger.warning("Проекты не найдены")
         return {"projects": projects, "source_counts": {"defillama": len(projects)}}

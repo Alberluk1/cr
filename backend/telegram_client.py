@@ -1,7 +1,7 @@
 import os
 import aiohttp
 
-# Значения по умолчанию (можно переопределить в env или config)
+# Значения по умолчанию, если переменные окружения не заданы
 DEFAULT_TOKEN = "8246586845:AAG2fGI6YZ719M39u_coxcPr1gTf6OVTrqw"
 DEFAULT_CHAT_ID = "-4746149710"
 
@@ -12,8 +12,12 @@ async def send_message(
     chat_id: str | None = None,
     enabled: bool | None = None,
     timeout: int = 10,
+    parse_mode: str | None = "Markdown",
 ) -> bool:
-    """Простая отправка сообщения в Telegram через aiohttp."""
+    """
+    Отправка простого сообщения в Telegram (aiohttp).
+    Возвращает True при статусе 200, иначе False.
+    """
     if enabled is False:
         return False
 
@@ -29,7 +33,7 @@ async def send_message(
     payload = {
         "chat_id": chat,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": parse_mode,
         "disable_web_page_preview": True,
     }
     try:
@@ -37,5 +41,5 @@ async def send_message(
             async with session.post(url, json=payload, timeout=timeout) as resp:
                 return resp.status == 200
     except Exception:
-        # Ошибки Telegram не должны ломать основной сервис
+        # Telegram может быть недоступен — просто возвращаем False без исключения
         return False
