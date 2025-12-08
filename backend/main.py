@@ -84,8 +84,9 @@ async def main():
 
     logger.info("Found %s projects to analyze.", len(projects))
 
-    for idx, project in enumerate(projects[:10], 1):
-        logger.info("Analyzing %s/%s: %s", idx, min(10, len(projects)), project.get("name"))
+    # limit to 1 project per run to save free-model daily quota
+    for idx, project in enumerate(projects[:1], 1):
+        logger.info("Analyzing %s/%s: %s", idx, min(1, len(projects)), project.get("name"))
         analysis = await analyzer.analyze_project(project)
         message = format_message(project, analysis)
         await send_message(message)
