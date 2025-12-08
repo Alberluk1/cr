@@ -172,10 +172,13 @@ class EnsembleOpenRouterAnalyzer:
             base_url="https://openrouter.ai/api/v1",
             default_headers=default_headers,
         )
-        # Keep only endpoints known to be available for free tier
+        # Free endpoints list (per OpenRouter free tier)
         self.models = models or [
             "mistralai/mistral-7b-instruct:free",
-            "openchat/openchat-3.5-0106:free",
+            "google/gemma-2b-it:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "huggingfaceh4/zephyr-7b-beta:free",
+            "openchat/openchat-7b:free",
         ]
         self.single = [OpenRouterAnalyzer(self.client, m) for m in self.models]
 
