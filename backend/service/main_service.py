@@ -3,25 +3,21 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import schedule
 
-from backend.config import get_notifications_config, get_scanner_config, get_db_path
-from backend.scanner.crypto_scanner import CryptoTracker
 from backend.analyzer.deepseek_analyzer import DeepSeekAnalyzer
 from backend.analyzer.strategy_generator import StrategyGenerator
+from backend.config import get_db_path, get_notifications_config, get_scanner_config
+from backend.scanner.crypto_scanner import CryptoTracker
 from backend.telegram_client import send_message as send_telegram_message
-from backend.bot.telegram_logger import log_detailed
-
-
-def check_models():
-    """Заглушка: для DeepSeek моделей не требуется."""
-    return {"available": [], "missing": []}
 
 
 class CryptoAlphaService:
-    """Сервис автоматического сканирования и анализа."""
+    """
+    Сервис: сканирует источники, анализирует проекты через DeepSeek и отправляет уведомления.
+    """
 
     def __init__(self):
         self.tracker = CryptoTracker()
@@ -31,128 +27,11 @@ class CryptoAlphaService:
         self.scan_cfg = get_scanner_config()
         self.running = False
 
+    # ---------------- DB helpers ---------------- #
     def _open_db(self):
         return sqlite3.connect(get_db_path())
 
-    async def scan_and_analyze(self):
-        """Полный цикл: скан -> анализ -> уведомление."""
-        print(f"[{datetime.now()}] start cycle")
-        await send_telegram_message("⏳ Старт цикла сканирования")
-        await log_detailed("SCAN", "start_cycle")
-        try:
-            # Проверка моделей перед сканом
-            model_info = await check_models()
-            report_lines = ["🔍 Проверка моделей:", "✅ Доступно:"]
-            report_lines += [f"• {m}" for m in model_info.get("available", [])]
-            if model_info.get("missing"):
-                report_lines.append("❌ Отсутствуют:")
-                report_lines += [f"• {m}" for m in model_info.get("missing")]
-            await send_telegram_message("\n".join(report_lines))
-
-            scan_start = time.time()
-            scan_result = await self.tracker.run_full_scan()
-            source_counts = scan_result.get("source_counts", {})
-            await log_detailed(
-                "SCAN",
-                "sources_completed",
-                status=f"{time.time() - scan_start:.1f}s",
-                details={"sources": source_counts},
-            )
-            await send_telegram_message(
-                f"📊 Источники просканированы за {time.time() - scan_start:.1f}s"
-            )
-
-            projects = scan_result.get("projects") or await self.get_unanalyzed_projects()
-            limit = self.scan_cfg.get("max_projects_per_scan", 20)
-            delay_between = self.analyzer.analysis_cfg.get("delay_between", 10)
-            analysis_timeout = self.analyzer.analysis_cfg.get("analysis_timeout", 60)
-
-            total = min(limit, len(projects))
-            for idx, project in enumerate(projects[:limit], 1):
-                try:
-                    await asyncio.sleep(delay_between)
-                    await send_telegram_message(
-                        f"🔎 Анализ {idx}/{total}: {project.get('name','Unknown')} ({project.get('source','unknown')})"
-                    )
-                    await log_detailed(
-                        "ANALYZE",
-                        "start",
-                        data=project.get("name", "Unknown"),
-                        details={"id": project.get("id"), "source": project.get("source")},
-                    )
-                    start = time.time()
-                    analysis = await asyncio.wait_for(
-                        self.analyzer.analyze_project(project), timeout=analysis_timeout
-                    )
-                    duration = time.time() - start
-                    inv_block = analysis.get("final_decision", {})
-                    if not isinstance(inv_block, dict):
-                        inv_block = {}
-                    inv = inv_block.get("investment_analysis", inv_block)
-                    if not isinstance(inv, dict):
-                        inv = {}
-                    score_val = inv.get("score_numeric") or inv.get("final_score") or analysis.get("score") or "N/A"
-                    await log_detailed(
-                        "ANALYZE",
-                        "done",
-                        data=project.get("name", "Unknown"),
-                        status=f"{duration:.1f}s",
-                        details={"score": score_val},
-                    )
-                    await send_telegram_message(
-                        f"✅ Анализ завершен: {project.get('name','Unknown')} за {duration:.1f}s score={score_val}"
-                    )
-                    if analysis.get("error"):
-                        await log_detailed(
-                            "ANALYZE",
-                            "parse_error",
-                            data=project.get("name", "Unknown"),
-                            status=str(analysis.get("error")),
-                            details={"id": project.get("id")},
-                            level="ERROR",
-                        )
-                        await self._notify_error(f"Ошибка анализа {project.get('id')}: {analysis.get('error')}")
-                        continue
-                    # Генерация стратегии
-                    try:
-                        score_for_strategy = inv.get("score_numeric") or analysis.get("score") or 0
-                        strategy = self.strategy_gen.generate_strategy(project, score_for_strategy)
-                        analysis["strategy"] = strategy
-                    except Exception:
-                        strategy = None
-                    await self.save_analysis(project["id"], analysis)
-                    if await self.should_notify(analysis):
-                        await self.send_notification(project, analysis)
-                except asyncio.TimeoutError:
-                    await log_detailed(
-                        "ANALYZE",
-                        "timeout",
-                        data=project.get("name", "Unknown"),
-                        status=f">{analysis_timeout}s",
-                        details={"id": project.get("id")},
-                        level="WARNING",
-                    )
-                    await self._notify_error(f"Таймаут анализа: {project.get('name')}")
-                    continue
-                except Exception as e:
-                    await log_detailed(
-                        "ANALYZE",
-                        "error",
-                        data=project.get("name", "Unknown"),
-                        status=str(e),
-                        details={"id": project.get("id")},
-                        level="ERROR",
-                    )
-                    await self._notify_error(f"Ошибка анализа {project.get('id')}: {e}")
-                    continue
-        except Exception as e:
-            print(f"Error in cycle: {e}")
-            await self._notify_error(f"Ошибка в цикле: {e}")
-        else:
-            await self._notify_scan_complete()
-
     async def get_unanalyzed_projects(self) -> List[Dict[str, Any]]:
-        """Проекты со статусом new."""
         conn = self._open_db()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -165,6 +44,8 @@ class CryptoAlphaService:
             """
         )
         rows = cursor.fetchall()
+        conn.close()
+
         projects: List[Dict[str, Any]] = []
         for row in rows:
             item = dict(row)
@@ -173,21 +54,13 @@ class CryptoAlphaService:
             except Exception:
                 item["raw_data"] = {}
             projects.append(item)
-        conn.close()
         return projects
 
     async def save_analysis(self, project_id: str, analysis: Dict[str, Any]):
-        """Сохраняет анализ и обновляет проект."""
         conn = self._open_db()
         cursor = conn.cursor()
-        final = analysis.get("final_decision", {}) or {}
-        if not isinstance(final, dict):
-            final = {}
-        inv = final.get("investment_analysis", final)
-        if not isinstance(inv, dict):
-            inv = {}
-        score = inv.get("score_numeric", inv.get("final_score", 0))
-        verdict = inv.get("recommendation", inv.get("verdict"))
+        score = analysis.get("score", 0)
+        verdict = analysis.get("verdict")
         try:
             cursor.execute(
                 """
@@ -219,22 +92,20 @@ class CryptoAlphaService:
         finally:
             conn.close()
 
+    # ---------------- Notifications ---------------- #
+    async def _notify_error(self, message: str):
+        await send_telegram_message(f"⚠️ Ошибка: {message}")
+
+    async def _notify_scan_complete(self):
+        await send_telegram_message("✅ Сканирование завершено.")
+
     async def should_notify(self, analysis: Dict[str, Any]) -> bool:
-        """Флаг: отправлять ли уведомление."""
         telegram_cfg = self.notifications_cfg.get("telegram", {})
         if not telegram_cfg.get("enabled", False):
             return False
-
-        final = analysis.get("final_decision", {}) or {}
-        if not isinstance(final, dict):
-            final = {}
-        inv = final.get("investment_analysis", final)
-        if not isinstance(inv, dict):
-            inv = {}
-        score = inv.get("score_numeric", 0) or 0
-        verdict = (inv.get("recommendation") or inv.get("verdict") or "").upper()
+        score = analysis.get("score", 0)
+        verdict = (analysis.get("verdict") or "").upper()
         threshold = telegram_cfg.get("alert_threshold", 8.0)
-
         if score >= threshold:
             return True
         if verdict in {"STRONG_BUY", "BUY", "SCAM"}:
@@ -242,16 +113,14 @@ class CryptoAlphaService:
         return False
 
     async def send_notification(self, project: Dict[str, Any], analysis: Dict[str, Any]):
-        """Отправка уведомления (через Telegram при включении)."""
         try:
             from backend.bot.telegram_bot import CryptoAlertBot
         except ImportError:
-            print("Telegram bot dependency missing.")
+            await send_telegram_message("Telegram bot dependency missing.")
             return
 
         telegram_cfg = self.notifications_cfg.get("telegram", {})
         if not telegram_cfg.get("enabled", False):
-            print("Telegram notifications disabled.")
             return
 
         bot = CryptoAlertBot(
@@ -260,12 +129,52 @@ class CryptoAlphaService:
         )
         await bot.send_alert(project, analysis)
 
+    # ---------------- Core workflow ---------------- #
+    async def scan_and_analyze(self):
+        start_msg = f"[{datetime.now()}] start cycle"
+        print(start_msg)
+        await send_telegram_message("⏳ Старт цикла сканирования")
+
+        try:
+            scan_start = time.time()
+            scan_result = await self.tracker.run_full_scan()
+            projects = scan_result.get("projects") or []
+            await send_telegram_message(f"📊 Источники просканированы за {time.time() - scan_start:.1f}s")
+
+            if not projects:
+                await send_telegram_message("⚠️ Новых проектов не найдено")
+                return
+
+            limit = self.scan_cfg.get("max_projects_per_scan", 20)
+            total = min(limit, len(projects))
+            delay_between = self.scan_cfg.get("delay_between", 1)
+
+            for idx, project in enumerate(projects[:limit], 1):
+                await send_telegram_message(f"🔎 Анализ {idx}/{total}: {project.get('name')}")
+                try:
+                    analysis = await self.analyzer.analyze_project(project)
+                    # Добавляем стратегию на основе оценки
+                    strategy = self.strategy_gen.generate_strategy(project, analysis.get("score", 0))
+                    analysis["strategy"] = strategy
+
+                    await self.save_analysis(project["id"], analysis)
+
+                    if await self.should_notify(analysis):
+                        await self.send_notification(project, analysis)
+                except Exception as e:
+                    await self._notify_error(f"Ошибка анализа {project.get('name')}: {e}")
+                await asyncio.sleep(delay_between)
+
+            await self._notify_scan_complete()
+        except Exception as e:
+            print(f"Error in cycle: {e}")
+            await self._notify_error(str(e))
+
     def _run_async(self, coro):
         asyncio.run(coro)
 
     def run_scheduled(self):
-        """Запуск с расписанием."""
-        # Стартовый прогон
+        # Одно сканирование при старте
         self._run_async(self.scan_and_analyze())
 
         interval = self.scan_cfg.get("interval", 1800)
@@ -281,18 +190,3 @@ class CryptoAlphaService:
     def stop(self):
         self.running = False
 
-    async def _notify_project(self, project: Dict[str, Any], analysis: Dict[str, Any]):
-        """Отключено, чтобы не дублировать уведомления (используем send_notification)."""
-        return
-
-    async def _notify_scan_complete(self):
-        """Краткое уведомление о завершении сканирования/анализа."""
-        await send_telegram_message("✅ Сканирование завершено")
-
-    async def _notify_error(self, message: str):
-        """Отправка критической ошибки."""
-        await send_telegram_message(f"⚠️ Ошибка: {message}")
-
-    async def _notify_info(self, message: str):
-        """Информационное уведомление."""
-        await send_telegram_message(message)

@@ -1,35 +1,38 @@
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
+
+from backend.telegram_client import send_message
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-    def __init__(self, bot_token: str = None, chat_id: str = None):
-        # Заглушка: если нужно реальное отправление — подключите python-telegram-bot
+    """Простой обертка для отправки форматированных сообщений в Telegram."""
+
+    def __init__(self, bot_token: str | None = None, chat_id: str | None = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
 
-    def format_project_message(self, project: Dict, analysis: Dict) -> str:
-        """Новый формат для качественных проектов."""
+    def format_project_message(self, project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
         name = project.get("name", "Unknown")
         category = project.get("category", "Unknown")
         tvl = project.get("metrics", {}).get("tvl", 0)
+        url = project.get("url", "нет ссылки")
 
         score = analysis.get("score", 0)
         verdict = analysis.get("verdict", "UNKNOWN")
-        quality = analysis.get("quality_assessment", "unknown")
-        growth = analysis.get("realistic_growth_potential") or analysis.get("realistic_growth", "n/a")
-        timeframe = analysis.get("growth_timeframe") or analysis.get("timeframe", "6-12 месяцев")
+        quality = analysis.get("quality_assessment", analysis.get("team_assessment", "unknown"))
+        growth = analysis.get("realistic_growth") or analysis.get("growth_potential") or "неизвестно"
+        timeframe = analysis.get("growth_timeframe", "6-12 месяцев")
 
         strengths = analysis.get("key_strengths") or analysis.get("key_advantages") or []
-        risks = analysis.get("main_risks") or analysis.get("risks") or []
-        team = analysis.get("team_assessment", "н/д")
-        product = analysis.get("product_readiness", "н/д")
+        risks = analysis.get("main_risks") or analysis.get("key_risks") or []
+        team = analysis.get("team_assessment", "неизвестно")
+        product = analysis.get("product_status", analysis.get("product_readiness", "неизвестно"))
 
         inv = analysis.get("investment_recommendation", {}) or {}
-        inv_size = inv.get("size", "н/д")
-        inv_entry = inv.get("entry_strategy", "н/д")
+        inv_size = inv.get("position_size") or inv.get("size") or "неизвестно"
+        inv_entry = inv.get("entry_conditions") or inv.get("entry_strategy") or "неизвестно"
         exit_signals = inv.get("exit_signals") or analysis.get("exit_signals") or []
 
         message = f"""
@@ -38,45 +41,40 @@ class TelegramBot:
 💰 *TVL:* ${tvl:,.0f}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⭐ *ОЦЕНКА КАЧЕСТВА:* {score}/10
-📈 *ВЕРДИКТ:* {verdict}
-🏆 *КАЧЕСТВО:* {quality}
+⭐ *Оценка качества:* {score}/10
+📈 *Вердикт:* {verdict}
+🏆 *Качество:* {quality}
 
-🎯 *ПОТЕНЦИАЛ РОСТА:* {growth}
-⏱️ *СРОК:* {timeframe}
+🎯 *Потенциал роста:* {growth}
+⏱️ *Срок:* {timeframe}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ *КЛЮЧЕВЫЕ ПРЕИМУЩЕСТВА:*
+✅ *Ключевые преимущества:*
 """
         for strength in strengths[:3]:
             message += f"• {strength}\n"
 
-        message += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *ОСНОВНЫЕ РИСКИ:*\n"
+        message += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *Основные риски:*\n"
         for risk in risks[:3]:
             message += f"• {risk}\n"
 
         message += f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👥 *КОМАНДА:* {team}
-🛠️ *ПРОДУКТ:* {product}
+👥 *Команда:* {team}
+🛠️ *Продукт:* {product}
 
-💼 *ИНВЕСТ. РЕКОМЕНДАЦИЯ:*
+💼 *Инвест. рекомендация:*
 • Размер: {inv_size}
-• Стратегия входа: {inv_entry}
+• Условия входа: {inv_entry}
 """
         if exit_signals:
-            message += "• Выход: " + "; ".join(exit_signals[:2]) + "\n"
+            message += "• Сигналы выхода: " + "; ".join(exit_signals[:2]) + "\n"
 
-        message += f"\n🔗 *Ссылка:* {project.get('url', 'Нет')}\n"
-        return message
+        message += f"\n🔗 *Ссылка:* {url}\n"
+        return message.strip()
 
-    async def send_project_analysis(self, project: Dict, analysis: Dict):
-        """Печать/лог (отправку можно прикрутить python-telegram-bot при наличии токена)."""
-        try:
-            message = self.format_project_message(project, analysis)
-            print("\n" + "=" * 50)
-            print(message)
-            print("=" * 50 + "\n")
-            logger.info(message)
-        except Exception as e:
-            logger.error(f"Ошибка форматирования сообщения: {e}")
+    async def send_project_analysis(self, project: Dict[str, Any], analysis: Dict[str, Any]):
+        """Форматирует и отправляет сообщение."""
+        message = self.format_project_message(project, analysis)
+        await send_message(message, token=self.bot_token, chat_id=self.chat_id)
+        logger.info("📤 Сообщение отправлено: %s", project.get("name"))
