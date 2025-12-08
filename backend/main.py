@@ -4,13 +4,18 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from backend.analyzer.deepseek_analyzer import DeepSeekAnalyzer
+# Обеспечиваем, что backend доступен при прямом запуске
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+from backend.analyzer.openrouter_analyzer import OpenRouterAnalyzer
 from backend.scanner.crypto_scanner import CryptoTracker
 from backend.telegram_client import send_message
 
-# Настраиваем логирование (DEBUG для диагностики DeepSeek)
+# Логи оставляем INFO по умолчанию, можно поднять до DEBUG при отладке
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
@@ -59,10 +64,15 @@ def format_message(project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
 
 
 async def main():
-    logger.info("🚀 Crypto Scanner (DeepSeek)")
+    logger.info("🚀 Crypto Scanner (OpenRouter)")
 
     scanner = CryptoTracker()
-    analyzer = DeepSeekAnalyzer()
+    try:
+        analyzer = OpenRouterAnalyzer()
+    except Exception as e:
+        logger.error("OPENROUTER_API_KEY не задан или недоступен: %s", e)
+        await send_message("❌ OPENROUTER_API_KEY не задан. Установите переменную окружения и перезапустите.")
+        return
 
     # Сканирование
     scan_result = await scanner.run_full_scan()

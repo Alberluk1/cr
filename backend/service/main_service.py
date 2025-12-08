@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 import schedule
 
-from backend.analyzer.deepseek_analyzer import DeepSeekAnalyzer
+from backend.analyzer.openrouter_analyzer import OpenRouterAnalyzer
 from backend.analyzer.strategy_generator import StrategyGenerator
 from backend.config import get_db_path, get_notifications_config, get_scanner_config
 from backend.scanner.crypto_scanner import CryptoTracker
@@ -16,12 +16,12 @@ from backend.telegram_client import send_message as send_telegram_message
 
 class CryptoAlphaService:
     """
-    Сервис: сканирует источники, анализирует проекты через DeepSeek и отправляет уведомления.
+    Сервис: сканирование источников -> анализ через OpenRouter -> уведомления.
     """
 
     def __init__(self):
         self.tracker = CryptoTracker()
-        self.analyzer = DeepSeekAnalyzer()
+        self.analyzer = OpenRouterAnalyzer()
         self.strategy_gen = StrategyGenerator()
         self.notifications_cfg = get_notifications_config()
         self.scan_cfg = get_scanner_config()
@@ -114,7 +114,7 @@ class CryptoAlphaService:
 
     async def send_notification(self, project: Dict[str, Any], analysis: Dict[str, Any]):
         try:
-            from backend.bot.telegram_bot import CryptoAlertBot
+            from backend.bot.telegram_bot import TelegramBot
         except ImportError:
             await send_telegram_message("Telegram bot dependency missing.")
             return
@@ -123,16 +123,15 @@ class CryptoAlphaService:
         if not telegram_cfg.get("enabled", False):
             return
 
-        bot = CryptoAlertBot(
-            token=telegram_cfg.get("token", ""),
+        bot = TelegramBot(
+            bot_token=telegram_cfg.get("token", ""),
             chat_id=telegram_cfg.get("chat_id", ""),
         )
-        await bot.send_alert(project, analysis)
+        await bot.send_project_analysis(project, analysis)
 
     # ---------------- Core workflow ---------------- #
     async def scan_and_analyze(self):
-        start_msg = f"[{datetime.now()}] start cycle"
-        print(start_msg)
+        print(f"[{datetime.now()}] start cycle")
         await send_telegram_message("⏳ Старт цикла сканирования")
 
         try:
@@ -153,7 +152,6 @@ class CryptoAlphaService:
                 await send_telegram_message(f"🔎 Анализ {idx}/{total}: {project.get('name')}")
                 try:
                     analysis = await self.analyzer.analyze_project(project)
-                    # Добавляем стратегию на основе оценки
                     strategy = self.strategy_gen.generate_strategy(project, analysis.get("score", 0))
                     analysis["strategy"] = strategy
 
@@ -170,23 +168,12 @@ class CryptoAlphaService:
             print(f"Error in cycle: {e}")
             await self._notify_error(str(e))
 
-    def _run_async(self, coro):
-        asyncio.run(coro)
-
-    def run_scheduled(self):
-        # Одно сканирование при старте
-        self._run_async(self.scan_and_analyze())
-
-        interval = self.scan_cfg.get("interval", 1800)
-        every = max(int(interval), 60)
-        schedule.every(every).seconds.do(lambda: self._run_async(self.scan_and_analyze()))
-        print(f"Scheduler: every {every} sec")
-
-        self.running = True
-        while self.running:
-            schedule.run_pending()
-            time.sleep(1)
+    async def run_scheduled(self):
+        """Асинхронный планировщик без вложенных asyncio.run."""
+        interval = max(int(self.scan_cfg.get("interval", 1800)), 60)
+        while True:
+            await self.scan_and_analyze()
+            await asyncio.sleep(interval)
 
     def stop(self):
         self.running = False
-

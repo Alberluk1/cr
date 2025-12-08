@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-    """Простой обертка для отправки форматированных сообщений в Telegram."""
+    """Простая обёртка для отправки форматированных сообщений в Telegram."""
 
     def __init__(self, bot_token: str | None = None, chat_id: str | None = None):
         self.bot_token = bot_token
@@ -21,19 +21,11 @@ class TelegramBot:
 
         score = analysis.get("score", 0)
         verdict = analysis.get("verdict", "UNKNOWN")
-        quality = analysis.get("quality_assessment", analysis.get("team_assessment", "unknown"))
+        summary = analysis.get("summary") or analysis.get("project_summary", "нет описания")
+        risk_level = analysis.get("risk_level", analysis.get("main_risk", "неизвестно"))
+        where_to_buy = analysis.get("where_to_buy", "неизвестно")
         growth = analysis.get("realistic_growth") or analysis.get("growth_potential") or "неизвестно"
         timeframe = analysis.get("growth_timeframe", "6-12 месяцев")
-
-        strengths = analysis.get("key_strengths") or analysis.get("key_advantages") or []
-        risks = analysis.get("main_risks") or analysis.get("key_risks") or []
-        team = analysis.get("team_assessment", "неизвестно")
-        product = analysis.get("product_status", analysis.get("product_readiness", "неизвестно"))
-
-        inv = analysis.get("investment_recommendation", {}) or {}
-        inv_size = inv.get("position_size") or inv.get("size") or "неизвестно"
-        inv_entry = inv.get("entry_conditions") or inv.get("entry_strategy") or "неизвестно"
-        exit_signals = inv.get("exit_signals") or analysis.get("exit_signals") or []
 
         message = f"""
 🔍 *{name}*
@@ -41,40 +33,22 @@ class TelegramBot:
 💰 *TVL:* ${tvl:,.0f}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⭐ *Оценка качества:* {score}/10
+⭐ *Оценка:* {score}/10
 📈 *Вердикт:* {verdict}
-🏆 *Качество:* {quality}
+🏆 *Потенциал:* {growth} (горизонт {timeframe})
 
-🎯 *Потенциал роста:* {growth}
-⏱️ *Срок:* {timeframe}
+💡 *Описание:*
+{summary}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ *Ключевые преимущества:*
+🏪 *Где купить:* {where_to_buy}
+⚠️ *Риски:* {risk_level}
+
+🔗 *Ссылка:* {url}
 """
-        for strength in strengths[:3]:
-            message += f"• {strength}\n"
-
-        message += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *Основные риски:*\n"
-        for risk in risks[:3]:
-            message += f"• {risk}\n"
-
-        message += f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👥 *Команда:* {team}
-🛠️ *Продукт:* {product}
-
-💼 *Инвест. рекомендация:*
-• Размер: {inv_size}
-• Условия входа: {inv_entry}
-"""
-        if exit_signals:
-            message += "• Сигналы выхода: " + "; ".join(exit_signals[:2]) + "\n"
-
-        message += f"\n🔗 *Ссылка:* {url}\n"
         return message.strip()
 
     async def send_project_analysis(self, project: Dict[str, Any], analysis: Dict[str, Any]):
-        """Форматирует и отправляет сообщение."""
+        """Форматирует и отправляет сообщение в Telegram."""
         message = self.format_project_message(project, analysis)
         await send_message(message, token=self.bot_token, chat_id=self.chat_id)
         logger.info("📤 Сообщение отправлено: %s", project.get("name"))
