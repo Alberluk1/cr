@@ -3,8 +3,10 @@ import asyncio
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any
+import random
+from urllib.parse import quote
 
 from backend.config import get_db_path, get_scanner_config
 from backend.bot.telegram_logger import log_detailed
@@ -81,8 +83,8 @@ class CryptoTracker:
         sort_options = ["updated", "stars", "forks"]
         random_term = random.choice(search_terms)
         sort = random.choice(sort_options)
-        # фильтр по дате создания: последние 6 месяцев
-        six_months_ago = datetime.now(tz=timezone.utc) - timedelta(days=180)
+        # фильтр по дате создания: последние 6 месяцев (UTC)
+        six_months_ago = datetime.utcnow() - timedelta(days=180)
         created_filter = six_months_ago.strftime("%Y-%m-%d")
         query = f"{random_term} created:>{created_filter}"
         params = f"q={quote(query)}&sort={sort}&order=desc&per_page=30"
@@ -110,6 +112,15 @@ class CryptoTracker:
                         data = await response.json()
                         batch_count = 0
                         for repo in data.get("items", [])[:10]:
+                            try:
+                                await log_detailed(
+                                    "SCAN",
+                                    "github_repo",
+                                    data=repo.get("full_name", ""),
+                                    status=f"stars={repo.get('stargazers_count',0)} created={repo.get('created_at','?')}",
+                                )
+                            except Exception:
+                                pass
                             projects.append(
                                 {
                                     "id": f"github_{repo['id']}",
