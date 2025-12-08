@@ -4,175 +4,105 @@ import asyncio
 import re
 from typing import Dict, Any, List
 
-from backend.ollama_client import OllamaClient
-
 logger = logging.getLogger(__name__)
 
 
 class AdvancedAnalyzer:
     def __init__(self, ollama_client=None):
-        # ollama_client может быть не передан (совместимость с существующим кодом)
-        self.ollama_client = ollama_client or OllamaClient()
-        self.available_models = [
-            "mistral:7b-instruct-q4KM",
-            "qwen2.5:3b-instruct-q4KM",
-            "phi3:mini",
-            "gemma2:2b-instruct-q4KS",
-            "llama3.2:3b-instruct-q4KM",
-        ]
-        # настройки анализа по умолчанию (используются в сервисе)
+        if ollama_client is None:
+            try:
+                import ollama
+                self.ollama = ollama.AsyncClient()
+            except Exception as e:
+                logger.error(f"Не удалось создать Ollama AsyncClient: {e}")
+                self.ollama = None
+        else:
+            self.ollama = ollama_client
+
+        self.available_models = self._get_available_models()
         self.analysis_cfg = {
-            "analysis_timeout": 60,
-            "delay_between": 2,
+            "analysis_timeout": 20,
+            "delay_between": 1,
         }
 
-    def _create_detailed_prompt(self, project: Dict) -> str:
-        """Создает ДЕТАЛЬНЫЙ промпт с ВСЕМИ данными проекта"""
+    def _get_available_models(self) -> List[str]:
+        try:
+            if self.ollama and hasattr(self.ollama, "list"):
+                models_response = self.ollama.list()
+                installed_models = [m.get("name", "") for m in models_response.get("models", [])]
+            else:
+                installed_models = []
+            possible = [
+                "mistral",
+                "llama3.2",
+                "phi3",
+                "qwen2.5",
+                "gemma2",
+            ]
+            available: List[str] = []
+            for base in possible:
+                for inst in installed_models:
+                    if inst.startswith(base):
+                        available.append(inst)
+                        break
+            if not available:
+                available = installed_models[:1] if installed_models else ["llama3.2:3b-instruct-q4_K_M"]
+            logger.info(f"🎯 Используем модели: {available}")
+            return available
+        except Exception:
+            return ["llama3.2:3b-instruct-q4_K_M"]
+
+    def _create_prompt(self, project: Dict[str, Any]) -> str:
         name = project.get("name", "Unknown")
-        description = project.get("description", "No description provided")
+        desc = project.get("description", "No description")
         category = project.get("category", "Unknown")
-        url = project.get("url", "No URL")
-
+        tvl = project.get("metrics", {}).get("tvl", 0)
         links = project.get("links", {}) or {}
-        links_text = ""
-        for platform, link in links.items():
-            if link:
-                links_text += f"{platform.upper()}: {link}\n"
+        links_text = "\n".join(f"{k}: {v}" for k, v in links.items() if v)
+        return f"""
+Проанализируй крипто-проект:
 
-        metrics = project.get("metrics", {}) or {}
-        tvl = metrics.get("tvl", 0)
-        tvl_change = metrics.get("tvl_change_7d", 0)
-        chain = metrics.get("chain", "Unknown")
-        audits = metrics.get("audits", 0)
+Название: {name}
+Описание: {desc}
+Категория: {category}
+TVL: ${tvl:,.0f}
 
-        prompt = f"""
-ТЫ: Эксперт по анализу крипто-проектов с 10-летним опытом.
-ЗАДАЧА: Проанализировать проект и дать РАЗВЕРНУТЫЙ ответ.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 ДАННЫЕ ПРОЕКТА:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🏷️ НАЗВАНИЕ: {name}
-📊 КАТЕГОРИЯ: {category}
-🔗 ОСНОВНАЯ ССЫЛКА: {url}
-
-📝 ОПИСАНИЕ:
-{description}
-
-🔗 ВСЕ ССЫЛКИ:
-{links_text}
-
-📈 МЕТРИКИ:
-• TVL (общая заблокированная стоимость): ${tvl:,.0f}
-• Изменение TVL за 7 дней: {tvl_change:+.1f}%
-• Блокчейн: {chain}
-• Аудиты: {audits} {'✅' if audits > 0 else '❌'}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 ТВОЙ АНАЛИЗ ДОЛЖЕН ВКЛЮЧАТЬ:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-1. ОЦЕНКА: от 1 до 10 (1=скам, 10=гем)
-2. ВЕРДИКТ: STRONG_BUY / BUY / HOLD / AVOID / SCAM
-3. УВЕРЕННОСТЬ: HIGH / MEDIUM / LOW
-4. СУТЬ ПРОЕКТА: 1-2 предложения что это
-5. СИЛЬНЫЕ СТОРОНЫ: 3-5 пунктов
-6. СЛАБЫЕ СТОРОНЫ/РИСКИ: 3-5 пунктов
-7. СТРАТЕГИЯ: что делать инвестору
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📤 ФОРМАТ ОТВЕТА (ТОЛЬКО JSON):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+Оцени от 1 до 10 и дай JSON ответ:
 {{
-  "score": число от 1 до 10,
-  "verdict": "STRONG_BUY/BUY/HOLD/AVOID/SCAM",
-  "confidence": "HIGH/MEDIUM/LOW",
-  "summary": "одно-два предложения что это за проект",
-  "strengths": ["сильная сторона 1", "сильная сторона 2", "сильная сторона 3"],
-  "weaknesses": ["риск 1", "риск 2", "риск 3"],
-  "strategy": "конкретные действия для инвестора",
-  "project_type": "DeFi/NFT/Gaming/Infrastructure/Other"
+  "score": число 1-10,
+  "verdict": "BUY/HOLD/AVOID",
+  "summary": "что это за проект",
+  "confidence": "HIGH/MEDIUM/LOW"
 }}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-❗ ВАЖНО: Будь КРИТИЧЕН и ОБЪЕКТИВЕН!
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Только JSON.
+Ссылки:
+{links_text}
 """
-        return prompt
 
     async def analyze_project(self, project: Dict) -> Dict[str, Any]:
-        """Анализирует проект с КОНСЕНСУСОМ моделей"""
-        logger.info(f"🔍 Анализ проекта: {project.get('name')}")
-
+        """Анализирует проект с помощью LLM."""
+        logger.info(f"🔍 Анализ: {project.get('name')}")
         try:
-            prompt = self._create_detailed_prompt(project)
+            if not self.available_models or not self.ollama:
+                return self._fallback(project)
 
-            tasks = []
-            for model in self.available_models:
-                tasks.append(self._analyze_with_model(model, prompt))
-
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=15,
+            prompt = self._create_prompt(project)
+            response = await self.ollama.chat(
+                model=self.available_models[0],
+                messages=[{"role": "user", "content": prompt}],
             )
-
-            successful = [r for r in results if isinstance(r, dict) and "score" in r]
-            if not successful:
-                return self._get_fallback_analysis(project)
-
-            scores = [a["score"] for a in successful if isinstance(a.get("score"), (int, float))]
-            if not scores:
-                return self._get_fallback_analysis(project)
-            avg_score = sum(scores) / len(scores)
-
-            best_analysis = min(successful, key=lambda x: abs(x["score"] - avg_score))
-            best_analysis["score"] = round(avg_score, 1)
-            best_analysis["models_used"] = len(successful)
-            best_analysis["original_scores"] = scores
-            return best_analysis
-
+            content = response["message"]["content"]
+            logger.info(f"Ответ LLM: {content[:120]}...")
+            analysis = json.loads(content)
+            return analysis
         except Exception as e:
-            logger.error(f"❌ Ошибка анализа: {e}")
-            return self._get_fallback_analysis(project)
+            logger.error(f"Ошибка анализа: {e}")
+            return self._fallback(project)
 
-    async def _analyze_with_model(self, model: str, prompt: str) -> Dict:
-        """Анализ одной моделью"""
-        try:
-            async with self.ollama_client.session() as client:
-                content = await client.generate(
-                    model=model,
-                    prompt=prompt,
-                    temperature=0.2,
-                    num_predict=500,
-                    timeout=30,
-                )
-
-            json_match = re.search(r"\{.*\}", content, re.DOTALL)
-            if not json_match:
-                return {"score": 5.0, "error": "Invalid JSON"}
-
-            analysis = json.loads(json_match.group())
-            if "score" in analysis:
-                score = float(analysis["score"])
-                if 1 <= score <= 10:
-                    return analysis
-            return {"score": 5.0, "error": "Invalid score"}
-
-        except Exception as e:
-            return {"score": 5.0, "error": str(e)}
-
-    def _get_fallback_analysis(self, project: Dict) -> Dict:
-        """Анализ по умолчанию если все модели провалились"""
+    def _fallback(self, project: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "score": 5.0,
             "verdict": "HOLD",
+            "summary": "Ошибка анализа",
             "confidence": "LOW",
-            "summary": f"{project.get('name')} - {project.get('category', 'Unknown')} проект",
-            "strengths": ["Новые данные отсутствуют"],
-            "weaknesses": ["Не удалось проанализировать"],
-            "strategy": "Требуется дополнительный анализ",
-            "project_type": project.get("category", "Unknown"),
-            "models_used": 0,
         }
