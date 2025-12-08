@@ -31,6 +31,7 @@ def format_message(project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
     where_to_buy = analysis.get("where_to_buy", "unknown")
     exchanges = analysis.get("exchanges") or []
     buy_links = analysis.get("buy_links") or []
+    contract = analysis.get("contract_address", "unknown")
     growth = analysis.get("realistic_growth", analysis.get("growth_potential", "unknown"))
     plan = analysis.get("plan", "No plan provided")
     main_risk = analysis.get("main_risk", "unknown")
