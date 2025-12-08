@@ -1,306 +1,103 @@
-import aiohttp
 import asyncio
-import json
-import os
-import sqlite3
-from datetime import datetime, timezone, timedelta
+import logging
 from typing import Dict, List, Any
-import random
-from urllib.parse import quote
 
-from backend.config import get_db_path, get_scanner_config
-from backend.bot.telegram_logger import log_detailed
-from backend.telegram_client import send_message as send_telegram_message
+import aiohttp
 
-
-def _ensure_dir(path: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+logger = logging.getLogger(__name__)
 
 
 class CryptoTracker:
-    """Сканер крипто-проектов из разных источников."""
-
     def __init__(self):
-        self.db_path = get_db_path()
-        _ensure_dir(self.db_path)
-        self.cfg = get_scanner_config()
-        self.init_database()
-
-    def init_database(self):
-        """Инициализация SQLite."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                category TEXT,
-                source TEXT,
-                description TEXT,
-                discovered_at TIMESTAMP,
-                raw_data TEXT,
-                status TEXT DEFAULT 'new',
-                llm_analysis TEXT,
-                confidence_score REAL,
-                verdict TEXT
-            )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT,
-                event_type TEXT,
-                event_data TEXT,
-                timestamp TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects (id)
-            )
-            """
-        )
-        conn.commit()
-        conn.close()
-
-    async def scan_github(self) -> List[Dict[str, Any]]:
-        """Сканирование GitHub search API."""
-        sources_cfg = self.cfg.get("sources", {})
-        if not sources_cfg.get("github", {}).get("enabled", True):
-            return []
-
-        # формируем случайный поисковый запрос, чтобы выдача менялась
-        search_terms = [
-            "web3",
-            "blockchain",
-            "defi",
-            "nft",
-            "crypto",
-            "smart contract",
-            "layer2 scaling",
-            "zk",
-            "wallet",
-        ]
-        sort_options = ["updated", "stars", "forks"]
-        random_term = random.choice(search_terms)
-        sort = random.choice(sort_options)
-        # фильтр по дате создания: последние 6 месяцев (UTC)
-        six_months_ago = datetime.utcnow() - timedelta(days=180)
-        created_filter = six_months_ago.strftime("%Y-%m-%d")
-        query = f"{random_term} created:>{created_filter}"
-        params = f"q={quote(query)}&sort={sort}&order=desc&per_page=30"
-        urls = [f"https://api.github.com/search/repositories?{params}"]
-
-        projects: List[Dict[str, Any]] = []
-        headers = {"User-Agent": "crypto-alpha-scout"}
-        token = os.getenv("GITHUB_TOKEN")
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
-        async with aiohttp.ClientSession(headers=headers) as session:
-            for url in urls:
-                try:
-                    async with session.get(url, timeout=15) as response:
-                        if response.status != 200:
-                            await log_detailed(
-                                "SCAN",
-                                "github_error",
-                                data=url,
-                                status=str(response.status),
-                                level="WARNING",
-                            )
-                            continue
-                        data = await response.json()
-                        batch_count = 0
-                        for repo in data.get("items", [])[:10]:
-                            try:
-                                await log_detailed(
-                                    "SCAN",
-                                    "github_repo",
-                                    data=repo.get("full_name", ""),
-                                    status=f"stars={repo.get('stargazers_count',0)} created={repo.get('created_at','?')}",
-                                )
-                            except Exception:
-                                pass
-                            projects.append(
-                                {
-                                    "id": f"github_{repo['id']}",
-                                    "name": repo.get("name"),
-                                    "description": repo.get("description"),
-                                    "category": "Infrastructure",
-                                    "source": "github",
-                                    "raw_data": repo,
-                                    "url": repo.get("html_url"),
-                                    "links": {
-                                        "github": repo.get("html_url"),
-                                        "homepage": repo.get("homepage"),
-                                        "api_url": repo.get("url"),
-                                    },
-                                    "metrics": {
-                                        "stars": repo.get("stargazers_count", 0),
-                                        "forks": repo.get("forks_count", 0),
-                                        "watchers": repo.get("watchers_count", 0),
-                                        "updated_at": repo.get("updated_at"),
-                                    },
-                                }
-                            )
-                            batch_count += 1
-                        await log_detailed(
-                            "SCAN",
-                            "github_ok",
-                            data=f"{random_term}|{sort}",
-                            status=f"items={batch_count}",
-                        )
-                except Exception as e:
-                    print(f"Error scanning GitHub: {e}")
-                    await log_detailed(
-                        "SCAN",
-                        "github_exception",
-                        data=url,
-                        status=str(e),
-                        level="ERROR",
-                    )
-        return projects
+        self.defillama_url = "https://api.llama.fi/protocols"
 
     async def scan_defi_llama(self) -> List[Dict[str, Any]]:
-        """Новые протоколы DeFi Llama (≤7 дней)."""
-        sources_cfg = self.cfg.get("sources", {})
-        if not sources_cfg.get("defillama", {}).get("enabled", True):
-            return []
-
-        url = "https://api.llama.fi/protocols"
+        """Сканирует только DeFi Llama для новых малых проектов"""
         projects: List[Dict[str, Any]] = []
 
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(url, timeout=30) as response:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.defillama_url, timeout=15) as response:
                     if response.status != 200:
-                        await log_detailed(
-                            "SCAN",
-                            "defillama_error",
-                            data=url,
-                            status=str(response.status),
-                            level="WARNING",
-                        )
-                        return []
-                    try:
-                        data = await response.json()
-                    except Exception as e_json:
-                        body_preview = (await response.text())[:200]
-                        await log_detailed(
-                            "SCAN",
-                            "defillama_json_error",
-                            data=url,
-                            status=str(e_json),
-                            level="ERROR",
-                            details={"body": body_preview},
-                        )
-                        return []
-                    for protocol in data:
-                        listed = protocol.get("listedAt")
-                        if not listed:
-                            continue
-                        listed_date = datetime.fromtimestamp(listed, tz=timezone.utc)
-                        days_ago = (datetime.now(tz=timezone.utc) - listed_date).days
-                        if days_ago <= 7:
-                            projects.append(
-                                {
-                                    "id": f"defillama_{protocol.get('slug')}",
-                                    "name": protocol.get("name"),
-                                    "category": "DeFi",
-                                    "source": "defillama",
-                                    "raw_data": protocol,
-                                    "url": protocol.get("url"),
-                                    "description": protocol.get("description"),
-                                    "links": {
-                                        "website": protocol.get("url"),
-                                        "twitter": protocol.get("twitter"),
-                                        "telegram": protocol.get("telegram"),
-                                        "github": protocol.get("github"),
-                                        "discord": protocol.get("discord"),
-                                    },
-                                    "metrics": {
-                                        "tvl": protocol.get("tvl", 0),
-                                        "chain": protocol.get("chain"),
-                                        "audits": protocol.get("audits", 0),
-                                        "category": protocol.get("category"),
-                                    },
+                        logger.error(f"❌ Ошибка DeFi Llama API: {response.status}")
+                        return projects
+
+                    all_protocols = await response.json()
+
+                    for protocol in all_protocols:
+                        try:
+                            name = (protocol.get("name") or "").strip()
+                            if not name:
+                                continue
+
+                            tvl = float(protocol.get("tvl", 0) or 0)
+                            category = (protocol.get("category") or "").lower()
+                            slug = protocol.get("slug", "")
+
+                            exclude_categories = ["bridge", "stablecoin", "cex", "services", ""]
+
+                            if (
+                                tvl > 0
+                                and tvl < 5_000_000
+                                and category not in exclude_categories
+                                and name != "Illuvium"
+                                and len(name) > 2
+                            ):
+                                links = {
+                                    "website": protocol.get("url", ""),
+                                    "twitter": protocol.get("twitter", ""),
+                                    "github": protocol.get("github", ""),
+                                    "telegram": protocol.get("telegram", ""),
+                                    "discord": protocol.get("discord", ""),
+                                    "docs": "",
                                 }
-                            )
-                    await log_detailed(
-                        "SCAN",
-                        "defillama_ok",
-                        data="new protocols",
-                        status=f"count={len(projects)}",
-                    )
-            except Exception as e:
-                print(f"Error scanning DeFi Llama: {e}")
-                await log_detailed(
-                    "SCAN",
-                    "defillama_exception",
-                    data=url,
-                    status=str(e),
-                    level="ERROR",
-                )
+                                links = {k: v for k, v in links.items() if v and v.strip()}
+
+                                project = {
+                                    "id": f"defillama_{slug}",
+                                    "name": name,
+                                    "description": protocol.get("description", "DeFi protocol"),
+                                    "category": category.capitalize(),
+                                    "source": "defillama",
+                                    "url": protocol.get("url", ""),
+                                    "links": links,
+                                    "metrics": {
+                                        "tvl": tvl,
+                                        "tvl_change_7d": protocol.get("change_7d", 0),
+                                        "chain": protocol.get("chain", "Multi-Chain"),
+                                        "audits": len(protocol.get("audit_links", []) or []),
+                                        "is_audited": len(protocol.get("audit_links", []) or []) > 0,
+                                    },
+                                    "raw_data": protocol,
+                                }
+
+                                projects.append(project)
+                                logger.info(
+                                    f"✅ Найден: {name} | TVL: ${tvl:,.0f} | Категория: {category}"
+                                )
+
+                        except Exception as e:
+                            logger.debug(f"Ошибка обработки протокола: {e}")
+                            continue
+
+                    projects = sorted(projects, key=lambda x: x["metrics"]["tvl"])[:30]
+                    logger.info(f"🎯 Отфильтровано {len(projects)} проектов")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка сканирования: {e}")
+
         return projects
 
-    async def run_full_scan(self) -> Dict[str, Any]:
-        """Полное сканирование (параллельно по источникам)."""
-        await log_detailed("SCAN", "run_full_scan_start")
-        await send_telegram_message("🛰️ Запуск сканирования источников")
-        tasks = [self.scan_github(), self.scan_defi_llama()]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+    async def run_full_scan(self) -> List[Dict[str, Any]]:
+        """Основная функция - ТОЛЬКО DeFi Llama (возвращает dict совместимо с сервисом)."""
+        logger.info("🛰️ Запуск сканирования DeFi Llama...")
 
-        all_projects: List[Dict[str, Any]] = []
-        source_counts: Dict[str, int] = {}
-        for result in results:
-            if isinstance(result, list):
-                all_projects.extend(result)
-                for p in result:
-                    src = p.get("source", "unknown")
-                    source_counts[src] = source_counts.get(src, 0) + 1
-        await log_detailed(
-            "SCAN",
-            "run_full_scan_done",
-            status=f"total={len(all_projects)}",
-            details={"sources": source_counts},
-        )
-        await send_telegram_message(
-            f"🛰️ Сканирование завершено, найдено {len(all_projects)} проектов\n"
-            + "\n".join(f"• {k}: {v}" for k, v in source_counts.items())
-        )
-        await self.save_projects(all_projects)
-        return {"projects": all_projects, "source_counts": source_counts}
+        projects = await self.scan_defi_llama()
 
-    async def save_projects(self, projects: List[Dict[str, Any]]) -> None:
-        """Сохранение проектов в БД."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        for project in projects:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO projects
-                    (id, name, category, source, description, discovered_at, raw_data)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        project.get("id"),
-                        project.get("name", "Unknown"),
-                        project.get("category", "uncategorized"),
-                        project.get("source", "unknown"),
-                        project.get("description"),
-                        datetime.now(tz=timezone.utc).isoformat(),
-                        json.dumps(project.get("raw_data", {})),
-                    ),
-                )
-            except Exception as e:
-                print(f"Error saving project {project.get('id')}: {e}")
-                await log_detailed(
-                    "SCAN",
-                    "save_project_error",
-                    data=str(project.get("id")),
-                    status=str(e),
-                    level="ERROR",
-                )
-        conn.commit()
-        conn.close()
+        if projects:
+            logger.info(f"📊 Сканирование завершено, найдено {len(projects)} проектов")
+            logger.info(f"• defillama: {len(projects)}")
+        else:
+            logger.warning("⚠️ Проекты не найдены")
+
+        return {"projects": projects, "source_counts": {"defillama": len(projects)}}

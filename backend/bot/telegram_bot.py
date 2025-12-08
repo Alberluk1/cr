@@ -1,93 +1,116 @@
-import json
-import sqlite3
-from datetime import datetime, timezone
+import logging
 from typing import Dict, Any
 
-from telegram import Bot
-from telegram.constants import ParseMode
-
-from backend.config import get_db_path
+logger = logging.getLogger(__name__)
 
 
-class CryptoAlertBot:
-    """Telegram бот для уведомлений."""
-
-    def __init__(self, token: str, chat_id: str):
-        self.bot = Bot(token=token)
+class TelegramBot:
+    def __init__(self, bot_token: str = None, chat_id: str = None):
+        # Пока заглушка, можно подключить python-telegram-bot позже
+        self.bot_token = bot_token
         self.chat_id = chat_id
-        self.db_path = get_db_path()
 
-    async def send_alert(self, project: Dict[str, Any], analysis: Dict[str, Any]):
-        final = analysis.get("final_decision", {}) or {}
-        strengths = analysis.get("analyst_analysis", {}).get("strengths", [])
-        risks = analysis.get("risk_analysis", {}).get("high_risks", [])
+    def format_project_message(self, project: Dict, analysis: Dict) -> str:
+        """Форматирует ПОЛНОЕ сообщение о проекте"""
 
-        message = f"""
-🚨 *НОВЫЙ ПРОЕКТ* 🚨
+        score = analysis.get("score", 0)
+        if score >= 8:
+            header = "🚀 HIGH-POTENTIAL PROJECT 🚀"
+        elif score >= 6:
+            header = "📊 PROJECT ANALYSIS 📊"
+        else:
+            header = "⚠️ RISK WARNING ⚠️"
 
-*Название:* {project.get('name', 'Unknown')}
-*Категория:* {project.get('category', 'Unknown')}
-*Источник:* {project.get('source', 'Unknown')}
+        name = project.get("name", "Unknown")
+        category = project.get("category", "Unknown")
+        source = project.get("source", "Unknown")
 
-📊 *ОЦЕНКА:*
-• Общий балл: *{final.get('final_score', 'N/A')}/10*
-• Вердикт: *{final.get('verdict', 'N/A')}*
-• Уверенность: {final.get('confidence', 'MEDIUM')}
+        links = project.get("links", {}) or {}
+        links_text = ""
+        for platform, url in links.items():
+            if url and url.strip():
+                links_text += f"• {platform.title()}: {url}\n"
 
-📈 *Сильные стороны:*
-{chr(10).join(f'• {s}' for s in strengths[:3])}
+        metrics = project.get("metrics", {}) or {}
+        tvl = metrics.get("tvl", 0)
+        tvl_change = metrics.get("tvl_change_7d", 0)
+        chain = metrics.get("chain", "Unknown")
 
-⚠️ *Риски:*
-{chr(10).join(f'• {r}' for r in risks[:3])}
+        verdict = analysis.get("verdict", "UNKNOWN")
+        confidence = analysis.get("confidence", "MEDIUM")
+        summary = analysis.get("summary", "No summary")
+        strengths = analysis.get("strengths", []) or []
+        weaknesses = analysis.get("weaknesses", []) or []
+        strategy = analysis.get("strategy", "No strategy")
+        models_used = analysis.get("models_used", 1)
 
-🕒 {datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
-"""
-        await self.bot.send_message(
-            chat_id=self.chat_id,
-            text=message,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True,
-        )
+        message = f"{header}\n\n"
+        message += f"🏷️ *Название:* {name}\n"
+        message += f"📊 *Категория:* {category} | 📍 {source}\n"
+        message += f"⭐ *Оценка:* {score}/10 ({verdict})\n"
+        message += f"🎯 *Уверенность:* {confidence}\n"
+        message += f"🤖 *Моделей использовано:* {models_used}\n\n"
 
-    async def send_daily_digest(self):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        start = datetime.now(tz=timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        cursor.execute(
-            """
-            SELECT COUNT(*) as total,
-                   SUM(CASE WHEN confidence_score >= 8 THEN 1 ELSE 0 END) as high_quality,
-                   SUM(CASE WHEN confidence_score <= 3 THEN 1 ELSE 0 END) as scams
-            FROM projects
-            WHERE discovered_at >= ? AND status = 'analyzed'
-            """,
-            (start.isoformat(),),
-        )
-        stats = cursor.fetchone()
-        message = f"""
-📊 *ЕЖЕДНЕВНЫЙ ДАЙДЖЕСТ*
+        message += f"🔗 *Основная ссылка:* {project.get('url', 'Нет ссылки')}\n\n"
 
-За последние 24 часа:
-• Всего проектов: *{stats[0] or 0}*
-• Высоко оцененных (8+): *{stats[1] or 0}*
-• Потенциальных скамов: *{stats[2] or 0}*
-"""
-        cursor.execute(
-            """
-            SELECT name, confidence_score, verdict
-            FROM projects
-            WHERE discovered_at >= ? AND confidence_score >= 7
-            ORDER BY confidence_score DESC
-            LIMIT 5
-            """,
-            (start.isoformat(),),
-        )
-        rows = cursor.fetchall()
-        for idx, (name, score, verdict) in enumerate(rows, 1):
-            message += f"\n{idx}. *{name}* - {score}/10 ({verdict})"
-        conn.close()
-        await self.bot.send_message(
-            chat_id=self.chat_id, text=message, parse_mode=ParseMode.MARKDOWN
-        )
+        if links_text:
+            message += "🌐 *Все ссылки:*\n"
+            message += links_text + "\n"
+
+        message += f"📈 *Метрики:*\n"
+        message += f"• TVL: ${tvl:,.0f}\n"
+        if tvl_change != 0:
+            change_emoji = "📈" if tvl_change > 0 else "📉"
+            message += f"• Изменение TVL (7д): {change_emoji} {tvl_change:+.1f}%\n"
+        message += f"• Блокчейн: {chain}\n\n"
+
+        message += f"💡 *Что это:*\n{summary}\n\n"
+
+        if strengths:
+            message += "✅ *Сильные стороны:*\n"
+            for i, strength in enumerate(strengths[:3], 1):
+                message += f"{i}. {strength}\n"
+            message += "\n"
+
+        if weaknesses:
+            message += "⚠️ *Риски и слабые стороны:*\n"
+            for i, weakness in enumerate(weaknesses[:3], 1):
+                message += f"{i}. {weakness}\n"
+            message += "\n"
+
+        message += f"💰 *Стратегия инвестирования:*\n{strategy}\n\n"
+
+        message += f"#{category.replace(' ', '')} #{source} "
+        if score >= 8:
+            message += "#HighPotential "
+        elif score >= 6:
+            message += "#MediumPotential "
+        else:
+            message += "#Risky "
+        if "tvl" in metrics and metrics["tvl"] > 0:
+            message += "#TVL "
+
+        return message
+
+    async def send_project_analysis(self, project: Dict, analysis: Dict):
+        """Отправляет анализ в Telegram или лог."""
+        try:
+            message = self.format_project_message(project, analysis)
+
+            # Здесь могла бы быть реальная отправка через python-telegram-bot
+            # если token/chat_id заданы. Пока просто лог/консоль.
+            logger.info("\n" + "=" * 50)
+            logger.info(f"📤 ГОТОВО К ОТПРАВКЕ: {project.get('name')}")
+            logger.info("\n" + message)
+            logger.info("=" * 50 + "\n")
+
+            print("\n" + "=" * 50)
+            print(message)
+            print("=" * 50 + "\n")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка форматирования сообщения: {e}")
+            fallback = f"🔍 {project.get('name')}\n"
+            fallback += f"⭐ Оценка: {analysis.get('score', 0)}/10\n"
+            fallback += f"🔗 Ссылка: {project.get('url', 'Нет')}"
+            print(fallback)
