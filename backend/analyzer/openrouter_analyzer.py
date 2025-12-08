@@ -10,36 +10,51 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 PROMPT_TEMPLATE = """
-You are a critical crypto investment analyst. Produce ONLY valid JSON, no prose.
+Ты DeFi-инвестор с 5+ лет опыта. Верни ТОЛЬКО валидный JSON, без текста вне JSON.
 
-Project:
-- Name: {name}
-- Category: {category}
+Данные:
+- Название: {name}
+- Категория: {category}
 - TVL (USD): {tvl:,.0f}
-- Description: {description}
-- Token symbol: {token_symbol}
+- Описание: {description}
+- Токен (если известен): {token_symbol}
 
-Rules:
-- If the project has no tradable token, say so clearly.
-- Use the TVL bands to cap realistic growth:
-  * <50k -> 1-2x
+Правила:
+- Если нет торгуемого токена, has_token=false, token_symbol="unknown", exchanges=[] и buy_links=[].
+- Найди контрактный адрес токена (если он есть); если неизвестен — пиши "unknown".
+- Генерируй ПРЯМЫЕ ссылки на пары (если есть контракт):
+  * Uniswap: https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency={CONTRACT_ADDRESS}
+  * PancakeSwap: https://pancakeswap.finance/swap?inputCurrency=BNB&outputCurrency={CONTRACT_ADDRESS}
+  * 1inch: https://app.1inch.io/#/1/swap/ETH/{CONTRACT_ADDRESS}
+- Система оценки (старт 6.0/10):
+  * TVL > $100M: +2; TVL < $1M: -2
+  * Низкая ликвидность: -2
+  * Высокая конкуренция: -1
+  * Команда известная: +1
+  * Проект новый (<6 мес): -1
+  * Если риски высокие — финальная оценка не выше 5.0
+- Реалистичный потенциал по TVL:
+  * <50k  -> 1-2x
   * 50k-200k -> 2-3x
   * 200k-500k -> 3-5x
-  * >500k -> 3-5x
-- No generic advice like "enter gradually". Be specific.
-- If data is unknown, write "unknown", do not invent.
+  * >500k -> 3-5x (не выше)
+- План действий: чёткие шаги (вход/докупка/стоп/цели).
+- Если данных нет — пиши "unknown", не выдумывай.
 
-Return JSON exactly in this shape:
+Верни JSON строго такого вида:
 {{
   "score": 1-10,
   "verdict": "STRONG_BUY/BUY/HOLD/AVOID/SCAM",
-  "summary": "one sentence what this project is",
+  "summary": "кратко что это за проект (по-русски)",
   "has_token": true/false,
-  "token_symbol": "XXX or unknown",
+  "token_symbol": "XXX или unknown",
+  "contract_address": "0x... или unknown",
+  "exchanges": ["Binance", "Uniswap"] или [],
+  "buy_links": ["https://..."] или [],
   "where_to_buy": "dex/cex/ido/unknown",
   "realistic_growth": "1-2x/2-3x/3-5x",
-  "main_risk": "one specific biggest risk",
-  "plan": "concrete next action for an investor"
+  "main_risk": "один главный риск",
+  "plan": "конкретный следующий шаг для инвестора (по-русски)"
 }}
 """
 
@@ -112,7 +127,10 @@ class OpenRouterAnalyzer:
             data["verdict"] = str(data.get("verdict", "HOLD")).upper()
             data.setdefault("has_token", False)
             data.setdefault("token_symbol", "unknown")
+            data.setdefault("contract_address", "unknown")
             data.setdefault("where_to_buy", "unknown")
+            data.setdefault("exchanges", [])
+            data.setdefault("buy_links", [])
             data.setdefault("realistic_growth", "1-2x")
             data.setdefault("main_risk", "unknown")
             data.setdefault("plan", "collect more data")
@@ -136,7 +154,10 @@ class OpenRouterAnalyzer:
             "summary": "Fallback analysis; LLM unavailable",
             "has_token": False,
             "token_symbol": "unknown",
+            "contract_address": "unknown",
             "where_to_buy": "unknown",
+            "exchanges": [],
+            "buy_links": [],
             "realistic_growth": "1-2x",
             "main_risk": "insufficient data",
             "plan": "await LLM result",

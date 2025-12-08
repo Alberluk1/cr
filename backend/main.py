@@ -29,6 +29,8 @@ def format_message(project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
 
     token_symbol = analysis.get("token_symbol", "unknown")
     where_to_buy = analysis.get("where_to_buy", "unknown")
+    exchanges = analysis.get("exchanges") or []
+    buy_links = analysis.get("buy_links") or []
     growth = analysis.get("realistic_growth", analysis.get("growth_potential", "unknown"))
     plan = analysis.get("plan", "No plan provided")
     main_risk = analysis.get("main_risk", "unknown")
@@ -46,6 +48,9 @@ def format_message(project: Dict[str, Any], analysis: Dict[str, Any]) -> str:
 
 💎 *Token:* {token_symbol}
 🛒 *Where to buy:* {where_to_buy}
+🏦 *Exchanges:* {', '.join(exchanges) if exchanges else 'unknown'}
+🔗 *Links:* {', '.join(buy_links) if buy_links else 'unknown'}
+📝 *Contract:* {contract}
 
 💡 *Summary:*
 {analysis.get('summary', 'No summary')}
@@ -90,3 +95,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    contract = analysis.get("contract_address", "unknown")
