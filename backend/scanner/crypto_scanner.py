@@ -66,11 +66,27 @@ class CryptoTracker:
         if not sources_cfg.get("github", {}).get("enabled", True):
             return []
 
-        urls = [
-            "https://api.github.com/search/repositories?q=crypto+language:solidity&sort=updated",
-            "https://api.github.com/search/repositories?q=defi+language:rust&sort=updated",
-            "https://api.github.com/search/repositories?q=nft+language:javascript&sort=updated",
+        # формируем случайный поисковый запрос, чтобы выдача менялась
+        search_terms = [
+            "web3",
+            "blockchain",
+            "defi",
+            "nft",
+            "crypto",
+            "smart contract",
+            "layer2 scaling",
+            "zk",
+            "wallet",
         ]
+        sort_options = ["updated", "stars", "forks"]
+        random_term = random.choice(search_terms)
+        sort = random.choice(sort_options)
+        # фильтр по дате создания: последние 6 месяцев
+        six_months_ago = datetime.now(tz=timezone.utc) - timedelta(days=180)
+        created_filter = six_months_ago.strftime("%Y-%m-%d")
+        query = f"{random_term} created:>{created_filter}"
+        params = f"q={quote(query)}&sort={sort}&order=desc&per_page=30"
+        urls = [f"https://api.github.com/search/repositories?{params}"]
 
         projects: List[Dict[str, Any]] = []
         headers = {"User-Agent": "crypto-alpha-scout"}
@@ -120,7 +136,7 @@ class CryptoTracker:
                         await log_detailed(
                             "SCAN",
                             "github_ok",
-                            data=url,
+                            data=f"{random_term}|{sort}",
                             status=f"items={batch_count}",
                         )
                 except Exception as e:
